@@ -1,5 +1,6 @@
-import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:serverpod_service_client/serverpod_service_client.dart';
+import 'package:serverpod_shared/serverpod_shared.dart';
+
 import 'extensions.dart';
 
 DatabaseMigration generateDatabaseMigration({

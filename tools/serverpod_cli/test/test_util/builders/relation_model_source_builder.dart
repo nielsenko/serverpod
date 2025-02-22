@@ -1,6 +1,7 @@
 import 'package:serverpod_cli/analyzer.dart';
-import 'package:serverpod_cli/src/test_util/builders/model_source_builder.dart';
 import 'package:serverpod_cli/src/util/model_helper.dart';
+
+import 'model_source_builder.dart';
 
 class RelationModelSourceBuilder {
   bool serverOnlyParent;
