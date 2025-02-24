@@ -164,6 +164,7 @@ abstract class EndpointMethodAnalyzer {
     return dartElement.metadata.expand<AnnotationDefinition>((annotation) {
       var annotationElement = annotation.element;
       var annotationName = annotationElement is ConstructorElement
+          // ignore: deprecated_member_use (must support older SDKs, ie. 3.3)
           ? annotationElement.enclosingElement.name
           : annotationElement?.name;
       if (annotationName == null) return [];

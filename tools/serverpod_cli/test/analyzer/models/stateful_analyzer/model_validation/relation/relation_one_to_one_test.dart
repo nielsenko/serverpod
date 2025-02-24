@@ -1,7 +1,6 @@
 import 'package:serverpod_cli/src/analyzer/models/definitions.dart';
 import 'package:serverpod_cli/src/analyzer/models/stateful_analyzer.dart';
 import 'package:serverpod_cli/src/generator/code_generation_collector.dart';
-import 'package:serverpod_cli/src/util/model_helper.dart';
 import 'package:test/test.dart';
 
 import '../../../../../test_util/builders/generator_config_builder.dart';
@@ -1042,12 +1041,4 @@ void main() {
       });
     });
   });
-}
-
-extension on List<ModelSource> {
-  void dumpOnFailure() {
-    for (var source in this) {
-      printOnFailure('${source.yamlSourceUri}:\n${source.yaml}');
-    }
-  }
 }

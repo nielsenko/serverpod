@@ -7,6 +7,9 @@ class NullStdOut implements Stdout {
   Encoding encoding = utf8;
 
   /// Line terminator used.
+  @override
+  // To match both Dart SDK 3.3 and 3.7
+  // ignore: override_on_non_overriding_member
   String lineTerminator = '\n';
 
   @override
