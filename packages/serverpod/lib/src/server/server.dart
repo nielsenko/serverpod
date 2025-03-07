@@ -428,16 +428,19 @@ class Server {
   }
 
   Future<String> _readBody(HttpRequest request) async {
-    var builder = BytesBuilder();
+    var builder = BytesBuilder(copy: false);
     var len = 0;
+    var tooLarge = false;
     await for (var segment in request) {
       len += segment.length;
-      if (len > serverpod.config.maxRequestSize) {
-        throw _RequestTooLargeException(serverpod.config.maxRequestSize);
-      }
+      if (tooLarge) continue; // ensure we drain the request stream regardless
+      if (len > serverpod.config.maxRequestSize) tooLarge = true;
       builder.add(segment);
     }
-    return const Utf8Decoder().convert(builder.toBytes());
+    if (tooLarge) {
+      throw _RequestTooLargeException(serverpod.config.maxRequestSize);
+    }
+    return const Utf8Decoder().convert(builder.takeBytes());
   }
 
   Future<Result> _handleUriCall(
