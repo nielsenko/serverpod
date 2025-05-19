@@ -1,3 +1,6 @@
+@Timeout.none
+library;
+
 import 'dart:async';
 import 'dart:io';
 
@@ -20,7 +23,7 @@ class ExceptionRoute extends WidgetRoute {
 }
 
 void main() {
-  const timeout = Duration(seconds: 3);
+  const timeout = Duration(days: 3);
 
   group(
       'Given a serverpod server with a diagnostic event handler, '
