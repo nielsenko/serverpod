@@ -38,8 +38,7 @@ class NativeGoogleCloudStorage extends CloudStorage {
   final String? publicHost;
 
   final Completer<gcs.StorageApi> _storageApiCompleter = Completer();
-  final Completer<gcs.ServiceAccountCredentials> _signingCredentialsCompleter =
-      Completer();
+  final Completer<_SigningContext> _signingContextCompleter = Completer();
 
   /// Creates a new [NativeGoogleCloudStorage] reference.
   ///
@@ -108,6 +107,24 @@ class NativeGoogleCloudStorage extends CloudStorage {
     _initializeAsync(serviceAccountJson);
   }
 
+  /// Creates a [NativeGoogleCloudStorage] using Application Default Credentials.
+  ///
+  /// This constructor uses ADC to authenticate, which automatically detects
+  /// credentials from the environment (GKE workload identity, Cloud Run
+  /// service account, `GOOGLE_APPLICATION_CREDENTIALS` env var, etc.).
+  ///
+  /// Signed URL generation requires the service account to have the
+  /// `iam.serviceAccounts.signBlob` IAM permission, since ADC does not
+  /// provide a local private key for signing.
+  NativeGoogleCloudStorage.withApplicationDefaultCredentials({
+    required String storageId,
+    required this.bucket,
+    required this.public,
+    this.publicHost,
+  }) : super(storageId) {
+    _initializeWithAdc();
+  }
+
   /// Creates a [NativeGoogleCloudStorage] with signing credentials for testing.
   ///
   /// This constructor allows testing direct upload functionality.
@@ -120,7 +137,9 @@ class NativeGoogleCloudStorage extends CloudStorage {
     this.publicHost,
   }) : super(storageId) {
     _storageApiCompleter.complete(storageApi);
-    _signingCredentialsCompleter.complete(credentials);
+    _signingContextCompleter.complete(
+      _SigningContext.fromCredentials(credentials),
+    );
   }
 
   Future<void> _initializeAsync(String serviceAccountJson) async {
@@ -135,13 +154,37 @@ class NativeGoogleCloudStorage extends CloudStorage {
       );
 
       _storageApiCompleter.complete(gcs.StorageApi(authClient));
-      _signingCredentialsCompleter.complete(credentials);
+      _signingContextCompleter.complete(
+        _SigningContext.fromCredentials(credentials),
+      );
     } catch (e) {
       if (!_storageApiCompleter.isCompleted) {
         _storageApiCompleter.completeError(e);
       }
-      if (!_signingCredentialsCompleter.isCompleted) {
-        _signingCredentialsCompleter.completeError(e);
+      if (!_signingContextCompleter.isCompleted) {
+        _signingContextCompleter.completeError(e);
+      }
+    }
+  }
+
+  Future<void> _initializeWithAdc() async {
+    try {
+      final authClient = await gcs.clientViaApplicationDefaultCredentials(
+        scopes: [gcs.StorageApi.devstorageFullControlScope],
+      );
+
+      _storageApiCompleter.complete(gcs.StorageApi(authClient));
+
+      final email = await authClient.getServiceAccountEmail();
+      _signingContextCompleter.complete(
+        _SigningContext.fromAuthClient(email, authClient),
+      );
+    } catch (e) {
+      if (!_storageApiCompleter.isCompleted) {
+        _storageApiCompleter.completeError(e);
+      }
+      if (!_signingContextCompleter.isCompleted) {
+        _signingContextCompleter.completeError(e);
       }
     }
   }
@@ -260,12 +303,12 @@ class NativeGoogleCloudStorage extends CloudStorage {
       );
     }
 
-    // Check if signing credentials are available
-    if (!_signingCredentialsCompleter.isCompleted) {
+    // Check if signing context is available
+    if (!_signingContextCompleter.isCompleted) {
       return null;
     }
 
-    final signingCredentials = await _signingCredentialsCompleter.future;
+    final signingContext = await _signingContextCompleter.future;
 
     final fileName = p.basename(path);
     final contentType = _detectMimeType(fileName);
@@ -279,8 +322,8 @@ class NativeGoogleCloudStorage extends CloudStorage {
       signingHeaders['content-length'] = contentLength.toString();
     }
 
-    final signedUrl = _createSignedUrl(
-      credentials: signingCredentials,
+    final signedUrl = await _createSignedUrl(
+      signingContext: signingContext,
       bucket: bucket,
       path: path,
       expiration: expirationDuration,
@@ -306,14 +349,14 @@ class NativeGoogleCloudStorage extends CloudStorage {
   }
 
   /// Creates a V4 signed URL for GCS operations.
-  String _createSignedUrl({
-    required gcs.ServiceAccountCredentials credentials,
+  Future<String> _createSignedUrl({
+    required _SigningContext signingContext,
     required String bucket,
     required String path,
     required Duration expiration,
     required String method,
     Map<String, String> headers = const {},
-  }) {
+  }) async {
     final now = DateTime.now().toUtc();
     final datestamp = _formatDatestamp(now);
     final timestamp = _formatTimestamp(now);
@@ -333,7 +376,7 @@ class NativeGoogleCloudStorage extends CloudStorage {
     // Build canonical query string (sorted alphabetically)
     final queryParams = <String, String>{
       'X-Goog-Algorithm': 'GOOG4-RSA-SHA256',
-      'X-Goog-Credential': '${credentials.email}/$credentialScope',
+      'X-Goog-Credential': '${signingContext.email}/$credentialScope',
       'X-Goog-Date': timestamp,
       'X-Goog-Expires': expiration.inSeconds.toString(),
       'X-Goog-SignedHeaders': signedHeaders,
@@ -365,8 +408,8 @@ class NativeGoogleCloudStorage extends CloudStorage {
       hashedCanonicalRequest,
     ].join('\n');
 
-    // Sign with RSA-SHA256
-    final signature = credentials.sign(utf8.encode(stringToSign));
+    // Sign the string
+    final signature = await signingContext.sign(utf8.encode(stringToSign));
     final signatureHex = signature
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join();
@@ -441,5 +484,40 @@ class NativeGoogleCloudStorage extends CloudStorage {
     }
 
     return result;
+  }
+}
+
+/// Abstraction over signing strategies for V4 signed URL generation.
+///
+/// Supports both service account credentials (local RSA signing) and
+/// Application Default Credentials (IAM signBlob API).
+class _SigningContext {
+  final String email;
+  final gcs.ServiceAccountCredentials? _credentials;
+  final gcs.AuthClient? _authClient;
+
+  /// Creates a signing context from service account credentials.
+  ///
+  /// Signs locally using the private key — no network call needed.
+  _SigningContext.fromCredentials(gcs.ServiceAccountCredentials credentials)
+    : email = credentials.email,
+      _credentials = credentials,
+      _authClient = null;
+
+  /// Creates a signing context from an authenticated client (ADC).
+  ///
+  /// Signs via the IAM signBlob API — requires
+  /// `iam.serviceAccounts.signBlob` permission.
+  _SigningContext.fromAuthClient(this.email, gcs.AuthClient authClient)
+    : _credentials = null,
+      _authClient = authClient;
+
+  /// Signs the given [data] and returns the raw signature bytes.
+  Future<Uint8List> sign(List<int> data) async {
+    if (_credentials != null) {
+      return _credentials.sign(data);
+    }
+    final base64Signature = await _authClient!.sign(data);
+    return base64.decode(base64Signature);
   }
 }
