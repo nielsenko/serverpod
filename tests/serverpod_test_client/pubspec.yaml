@@ -9,7 +9,7 @@ description: Part of tests for Serverpod.
 repository: https://github.com/serverpod/serverpod
 
 environment:
-  sdk: '^3.8.0'
+  sdk: '^3.9.0'
 
 dependencies:
   serverpod_auth_client: 3.3.1
