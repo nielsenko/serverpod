@@ -13,10 +13,9 @@ environment:
 dependencies:
   crypto: ^3.0.2
   googleapis: ">=11.0.0 <17.0.0"
-  googleapis_auth: ">=1.6.0 <3.0.0"
+  googleapis_auth: ^2.1.0
   http: ">=1.1.0 <2.0.0"
   path: ^1.8.3
-  pointycastle: ">=3.7.4 <5.0.0"
   serverpod: SERVERPOD_VERSION
   serverpod_cloud_storage_s3_compat: SERVERPOD_VERSION
 

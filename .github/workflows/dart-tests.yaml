@@ -475,8 +475,8 @@ jobs:
   cloud_storage_integration_tests:
     name: Cloud Storage Integration Tests (${{ matrix.provider.name }})
     runs-on: ubuntu-latest
-    # Only run on push events or PRs from the same repository (not forks)
-    # This prevents secrets from being exposed to fork PRs
+    # Only run on push events or PRs from the same repository (not forks),
+    # to avoid spinning up matrix runners that would just skip, due to missing secrets
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false

@@ -4,10 +4,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:googleapis/storage/v1.dart' as gcs;
-import 'package:googleapis_auth/auth_io.dart';
+import 'package:googleapis_auth/auth_io.dart' as gcs;
 import 'package:path/path.dart' as p;
-import 'package:pointycastle/asn1.dart';
-import 'package:pointycastle/export.dart';
 import 'package:serverpod/serverpod.dart';
 
 /// GCP cloud storage using native Google Cloud JSON API.
@@ -40,7 +38,7 @@ class NativeGoogleCloudStorage extends CloudStorage {
   final String? publicHost;
 
   final Completer<gcs.StorageApi> _storageApiCompleter = Completer();
-  final Completer<_SigningCredentials> _signingCredentialsCompleter =
+  final Completer<gcs.ServiceAccountCredentials> _signingCredentialsCompleter =
       Completer();
 
   /// Creates a new [NativeGoogleCloudStorage] reference.
@@ -118,50 +116,26 @@ class NativeGoogleCloudStorage extends CloudStorage {
     required this.bucket,
     required this.public,
     required gcs.StorageApi storageApi,
-    required String clientEmail,
-    required RSAPrivateKey privateKey,
+    required gcs.ServiceAccountCredentials credentials,
     this.publicHost,
   }) : super(storageId) {
     _storageApiCompleter.complete(storageApi);
-    _signingCredentialsCompleter.complete(
-      _SigningCredentials(
-        clientEmail: clientEmail,
-        privateKey: privateKey,
-      ),
-    );
+    _signingCredentialsCompleter.complete(credentials);
   }
 
   Future<void> _initializeAsync(String serviceAccountJson) async {
     try {
-      final jsonData = jsonDecode(serviceAccountJson) as Map<String, dynamic>;
-      final credentials = ServiceAccountCredentials.fromJson(jsonData);
+      final credentials = gcs.ServiceAccountCredentials.fromJson(
+        serviceAccountJson,
+      );
 
-      final authClient = await clientViaServiceAccount(
+      final authClient = await gcs.clientViaServiceAccount(
         credentials,
         [gcs.StorageApi.devstorageFullControlScope],
       );
 
       _storageApiCompleter.complete(gcs.StorageApi(authClient));
-
-      // Parse signing credentials for direct uploads
-      final clientEmail = jsonData['client_email'] as String?;
-      final privateKeyPem = jsonData['private_key'] as String?;
-
-      if (clientEmail != null && privateKeyPem != null) {
-        final privateKey = _parsePrivateKeyFromPem(privateKeyPem);
-        _signingCredentialsCompleter.complete(
-          _SigningCredentials(
-            clientEmail: clientEmail,
-            privateKey: privateKey,
-          ),
-        );
-      } else {
-        _signingCredentialsCompleter.completeError(
-          StateError(
-            'Service account JSON missing client_email or private_key',
-          ),
-        );
-      }
+      _signingCredentialsCompleter.complete(credentials);
     } catch (e) {
       if (!_storageApiCompleter.isCompleted) {
         _storageApiCompleter.completeError(e);
@@ -170,37 +144,6 @@ class NativeGoogleCloudStorage extends CloudStorage {
         _signingCredentialsCompleter.completeError(e);
       }
     }
-  }
-
-  /// Parses an RSA private key from PEM format.
-  RSAPrivateKey _parsePrivateKeyFromPem(String pem) {
-    final lines = pem
-        .split('\n')
-        .where((line) => !line.startsWith('-----'))
-        .join();
-    final bytes = base64.decode(lines);
-    final asn1Parser = ASN1Parser(Uint8List.fromList(bytes));
-    final topLevelSeq = asn1Parser.nextObject() as ASN1Sequence;
-
-    // PKCS#8 format: PrivateKeyInfo ::= SEQUENCE { version, algorithm, privateKey }
-    // The privateKey is an OCTET STRING containing the RSA private key
-    ASN1Sequence rsaSeq;
-    if (topLevelSeq.elements!.length == 3) {
-      // PKCS#8 format
-      final privateKeyOctet = topLevelSeq.elements![2] as ASN1OctetString;
-      final pkParser = ASN1Parser(privateKeyOctet.valueBytes);
-      rsaSeq = pkParser.nextObject() as ASN1Sequence;
-    } else {
-      // PKCS#1 format (raw RSA key)
-      rsaSeq = topLevelSeq;
-    }
-
-    final modulus = (rsaSeq.elements![1] as ASN1Integer).integer!;
-    final privateExponent = (rsaSeq.elements![3] as ASN1Integer).integer!;
-    final p = (rsaSeq.elements![4] as ASN1Integer).integer!;
-    final q = (rsaSeq.elements![5] as ASN1Integer).integer!;
-
-    return RSAPrivateKey(modulus, privateExponent, p, q);
   }
 
   Future<gcs.StorageApi> get _storageApi => _storageApiCompleter.future;
@@ -364,7 +307,7 @@ class NativeGoogleCloudStorage extends CloudStorage {
 
   /// Creates a V4 signed URL for GCS operations.
   String _createSignedUrl({
-    required _SigningCredentials credentials,
+    required gcs.ServiceAccountCredentials credentials,
     required String bucket,
     required String path,
     required Duration expiration,
@@ -390,7 +333,7 @@ class NativeGoogleCloudStorage extends CloudStorage {
     // Build canonical query string (sorted alphabetically)
     final queryParams = <String, String>{
       'X-Goog-Algorithm': 'GOOG4-RSA-SHA256',
-      'X-Goog-Credential': '${credentials.clientEmail}/$credentialScope',
+      'X-Goog-Credential': '${credentials.email}/$credentialScope',
       'X-Goog-Date': timestamp,
       'X-Goog-Expires': expiration.inSeconds.toString(),
       'X-Goog-SignedHeaders': signedHeaders,
@@ -423,23 +366,13 @@ class NativeGoogleCloudStorage extends CloudStorage {
     ].join('\n');
 
     // Sign with RSA-SHA256
-    final signature = _rsaSign(credentials.privateKey, stringToSign);
+    final signature = credentials.sign(utf8.encode(stringToSign));
     final signatureHex = signature
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join();
 
     // Build final URL
     return 'https://$host$canonicalUri?$canonicalQueryString&X-Goog-Signature=$signatureHex';
-  }
-
-  /// Signs data using RSA-SHA256.
-  Uint8List _rsaSign(RSAPrivateKey privateKey, String data) {
-    final signer = RSASigner(SHA256Digest(), '0609608648016503040201');
-    signer.init(true, PrivateKeyParameter<RSAPrivateKey>(privateKey));
-    final signature = signer.generateSignature(
-      Uint8List.fromList(utf8.encode(data)),
-    );
-    return signature.bytes;
   }
 
   /// Formats a DateTime as YYYYMMDD.
@@ -509,15 +442,4 @@ class NativeGoogleCloudStorage extends CloudStorage {
 
     return result;
   }
-}
-
-/// Internal class to hold signing credentials.
-class _SigningCredentials {
-  final String clientEmail;
-  final RSAPrivateKey privateKey;
-
-  _SigningCredentials({
-    required this.clientEmail,
-    required this.privateKey,
-  });
 }
