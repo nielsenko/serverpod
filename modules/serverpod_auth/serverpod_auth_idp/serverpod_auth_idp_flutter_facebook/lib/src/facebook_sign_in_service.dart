@@ -89,9 +89,8 @@ class FacebookSignInService {
       if (!auth.isAuthenticated) {
         unawaited(
           facebookAuth.logOut().onError(
-            (e, _) => debugPrint(
-              'Failed to sign out from Facebook: ${e.toString()}',
-            ),
+            (e, _) =>
+                debugPrint('Failed to sign out from Facebook: ${e.toString()}'),
           ),
         );
       }

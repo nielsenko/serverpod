@@ -29,7 +29,8 @@ import 'copier.dart';
 enum ServerpodTemplateType {
   mini('mini'),
   server('server'),
-  module('module');
+  module('module')
+  ;
 
   final String name;
   const ServerpodTemplateType(this.name);

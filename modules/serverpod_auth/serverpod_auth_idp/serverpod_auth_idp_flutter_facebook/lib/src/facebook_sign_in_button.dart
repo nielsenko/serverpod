@@ -90,9 +90,7 @@ class FacebookSignInButton extends StatelessWidget {
           disabledBackgroundColor: buttonStyle.backgroundColor.withValues(
             alpha: .6,
           ),
-          disabledForegroundColor: buttonStyle.textColor.withValues(
-            alpha: 0.6,
-          ),
+          disabledForegroundColor: buttonStyle.textColor.withValues(alpha: 0.6),
         ),
         child: _buildButtonContent(buttonStyle),
       ),
@@ -106,9 +104,7 @@ class FacebookSignInButton extends StatelessWidget {
         width: 20,
         child: CircularProgressIndicator(
           strokeWidth: 2,
-          valueColor: AlwaysStoppedAnimation<Color>(
-            buttonStyle.textColor,
-          ),
+          valueColor: AlwaysStoppedAnimation<Color>(buttonStyle.textColor),
         ),
       );
     }
@@ -121,41 +117,25 @@ class FacebookSignInButton extends StatelessWidget {
 
     final logo = SizedBox.square(
       dimension: logoSize,
-      child: Icon(
-        Icons.facebook,
-        size: logoSize,
-        color: buttonStyle.textColor,
-      ),
+      child: Icon(Icons.facebook, size: logoSize, color: buttonStyle.textColor),
     );
 
     final textWidget = Text(
       _getButtonText(),
-      style: TextStyle(
-        fontSize: _getFontSize(),
-        color: buttonStyle.textColor,
-      ),
+      style: TextStyle(fontSize: _getFontSize(), color: buttonStyle.textColor),
       overflow: TextOverflow.ellipsis,
     );
 
     if (logoAlignment == FacebookButtonLogoAlignment.center) {
       return Row(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          logo,
-          const SizedBox(width: 8),
-          textWidget,
-        ],
+        children: [logo, const SizedBox(width: 8), textWidget],
       );
     }
 
     return Stack(
       children: [
-        Positioned(
-          left: 13,
-          top: 0,
-          bottom: 0,
-          child: logo,
-        ),
+        Positioned(left: 13, top: 0, bottom: 0, child: logo),
         Row(
           mainAxisSize: MainAxisSize.max,
           mainAxisAlignment: MainAxisAlignment.center,

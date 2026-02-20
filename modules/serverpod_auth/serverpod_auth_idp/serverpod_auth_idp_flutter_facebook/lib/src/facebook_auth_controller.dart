@@ -102,9 +102,7 @@ class FacebookAuthController extends ChangeNotifier {
   /// Initializes the Facebook Sign-In service.
   Future<void> _initialize() async {
     try {
-      await FacebookSignInService.instance.ensureInitialized(
-        auth: client.auth,
-      );
+      await FacebookSignInService.instance.ensureInitialized(auth: client.auth);
       _setState(FacebookAuthState.idle);
     } catch (error) {
       _error = error;

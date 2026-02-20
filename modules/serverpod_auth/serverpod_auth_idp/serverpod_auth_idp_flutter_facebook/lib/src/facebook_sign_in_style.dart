@@ -95,14 +95,8 @@ class FacebookSignInStyle {
     };
 
     final (backgroundColor, textColor) = switch (style) {
-      FacebookButtonStyle.blue => (
-        const Color(0xFF1877F2),
-        Colors.white,
-      ),
-      FacebookButtonStyle.white => (
-        Colors.white,
-        const Color(0xFF1877F2),
-      ),
+      FacebookButtonStyle.blue => (const Color(0xFF1877F2), Colors.white),
+      FacebookButtonStyle.white => (Colors.white, const Color(0xFF1877F2)),
     };
 
     return FacebookSignInStyle(

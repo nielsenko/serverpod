@@ -56,7 +56,8 @@ enum ColumnType implements _i1.SerializableModel {
   sparsevec,
 
   /// Dart type: [Bit]
-  bit;
+  bit
+  ;
 
   static ColumnType fromJson(int index) {
     switch (index) {
