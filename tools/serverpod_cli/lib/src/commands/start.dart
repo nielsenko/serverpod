@@ -439,19 +439,23 @@ Future<int> _startWatchSession({
       return result.dillOutput ?? initialDill;
     }
 
-    serverProcessFactory = (String dillPath) async {
-      final serverProcess = ServerProcess(
-        serverDir: serverDir,
-        serverArgs: serverArgs,
-        dartExecutable: compiler!.dartExecutable,
-        enableVmService: true,
-        vmServiceInfoFile: vmServiceInfoFile,
-        onReloadRequested: onReloadRequested,
-      );
-      await serverProcess.start(dillPath: dillPath);
-      await serverProcess.connectToVmService();
-      return serverProcess;
-    };
+    serverProcessFactory =
+        (
+          String dillPath, {
+          List<String> extraArgs = const [],
+        }) async {
+          final serverProcess = ServerProcess(
+            serverDir: serverDir,
+            serverArgs: [...serverArgs, ...extraArgs],
+            dartExecutable: compiler!.dartExecutable,
+            enableVmService: true,
+            vmServiceInfoFile: vmServiceInfoFile,
+            onReloadRequested: onReloadRequested,
+          );
+          await serverProcess.start(dillPath: dillPath);
+          await serverProcess.connectToVmService();
+          return serverProcess;
+        };
 
     initialServerProcess = await serverProcessFactory(initialDill);
   }

@@ -136,10 +136,11 @@ void main() {
           generatedFiles: generatedFiles,
         );
       },
-      createServer: (dillPath) async {
-        factoryCalls.add('createServer:$dillPath');
-        return factoryServer;
-      },
+      createServer:
+          (String dillPath, {List<String> extraArgs = const []}) async {
+            factoryCalls.add('createServer:$dillPath');
+            return factoryServer;
+          },
       initialServer: server,
       generatedDirPaths: {'/generated'},
     );

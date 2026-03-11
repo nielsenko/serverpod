@@ -22,7 +22,32 @@ typedef GenerateAction =
 
 /// Creates a new server process, starts it, connects VM service,
 /// and returns it ready for use.
-typedef ServerProcessFactory = Future<ServerProcess> Function(String dillPath);
+///
+/// [extraArgs] are appended to the server args for this invocation only
+/// (e.g. `--apply-migrations` for a one-shot migration).
+typedef ServerProcessFactory =
+    Future<ServerProcess> Function(
+      String dillPath, {
+      List<String> extraArgs,
+    });
+
+/// The lifecycle state of a [WatchSession].
+///
+/// Used to suppress spurious crash detection during intentional server
+/// restarts and to guard against reentrancy.
+enum SessionState {
+  /// Normal operation. Server exit in this state is treated as a crash.
+  idle,
+
+  /// The server is being restarted due to a hot reload failure.
+  restarting,
+
+  /// The server is being restarted with `--apply-migrations`.
+  applyingMigration,
+
+  /// The session has been disposed. No further operations are expected.
+  disposed,
+}
 
 /// Orchestrates the watch-mode reload cycle.
 ///
@@ -53,7 +78,7 @@ class WatchSession {
   final Set<String> _pendingPaths = {};
 
   ServerProcess _server;
-  bool _restarting = false;
+  SessionState _state = SessionState.idle;
 
   WatchSession({
     KernelCompiler? compiler,
@@ -240,17 +265,65 @@ class WatchSession {
     }
     compiler.accept();
 
-    _restarting = true;
-    await _server.stop();
-    _server = await _createServer!(fullResult.dillOutput!);
-    _monitorExit(_server);
-    _restarting = false;
-    log.info(serverRestarted);
+    _state = SessionState.restarting;
+    try {
+      await _server.stop();
+      _server = await _createServer!(fullResult.dillOutput!);
+      _monitorExit(_server);
+      log.info(serverRestarted);
+    } finally {
+      _state = SessionState.idle;
+    }
+  }
+
+  /// Restarts the server with `--apply-migrations` (one-shot).
+  ///
+  /// Throws a [StateError] if a migration is already in progress or if the
+  /// compiler is not available (--no-fes mode). Throws on compilation failure
+  /// so the caller (MCP server) can report the error to the client.
+  Future<void> applyMigration() async {
+    if (_state == SessionState.applyingMigration) {
+      throw StateError('Migration already in progress.');
+    }
+
+    final createServer = _createServer;
+    final compiler = _compiler;
+    if (compiler == null || createServer == null) {
+      throw StateError(
+        'Cannot apply migrations in --no-fes mode. '
+        'Restart the server manually with --apply-migrations.',
+      );
+    }
+
+    _state = SessionState.applyingMigration;
+    try {
+      // Full compile so we have a complete kernel for the new process.
+      await compiler.reset();
+      final result = await compileWithProgress(
+        'Compiling server',
+        compiler,
+        rejectOnFailure: true,
+      );
+      if (result == null) {
+        throw StateError('Compilation failed. Migration not applied.');
+      }
+      compiler.accept();
+
+      await _server.stop();
+      _server = await createServer(
+        result.dillOutput!,
+        extraArgs: ['--apply-migrations'],
+      );
+      _monitorExit(_server);
+      log.info('Server restarted with --apply-migrations.');
+    } finally {
+      _state = SessionState.idle;
+    }
   }
 
   /// Disposes the session: stops server and disposes compiler.
   Future<void> dispose() async {
-    _restarting = true;
+    _state = SessionState.disposed;
     await _server.stop();
     await _compiler?.dispose();
   }
@@ -258,7 +331,7 @@ class WatchSession {
   void _monitorExit(ServerProcess server) {
     unawaited(
       server.exitCode.then((code) {
-        if (!_restarting && !_done.isCompleted) {
+        if (_state == SessionState.idle && !_done.isCompleted) {
           _done.complete(code);
         }
       }),
