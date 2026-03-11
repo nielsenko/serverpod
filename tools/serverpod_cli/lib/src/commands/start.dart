@@ -11,6 +11,7 @@ import 'package:serverpod_cli/src/commands/generate.dart';
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/start/file_watcher.dart';
 import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
+import 'package:serverpod_cli/src/commands/start/mcp_socket.dart';
 import 'package:serverpod_cli/src/commands/start/server_process.dart';
 import 'package:serverpod_cli/src/commands/start/watch_session.dart';
 import 'package:serverpod_cli/src/commands/watcher.dart';
@@ -468,6 +469,17 @@ Future<int> _startWatchSession({
     generatedDirPaths: generatedDirPaths,
   );
 
+  // Start MCP socket server for AI agent integration.
+  final mcpSocketPath = p.join(serverpodToolDir, 'mcp.sock');
+  final mcpSocket = McpSocketServer(socketPath: mcpSocketPath);
+  try {
+    await mcpSocket.start();
+    mcpSocket.connect(onApplyMigration: session.applyMigration);
+    log.info('MCP server listening on ${mcpSocket.socketPath}');
+  } on SocketException catch (e) {
+    log.warning('Failed to start MCP server: $e');
+  }
+
   final fileChangeSub = watcher.onFilesChanged
       .asyncMapBuffer(
         (events) => session.handleFileChange(events.merge()),
@@ -482,6 +494,7 @@ Future<int> _startWatchSession({
 
   // Clean up.
   await fileChangeSub.cancel();
+  await mcpSocket.close();
   await session.dispose();
 
   return exitCode;
