@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:args/args.dart';
 import 'package:cli_tools/cli_tools.dart';
@@ -126,6 +125,11 @@ class StartCommand extends ServerpodCommand<StartOption> {
     final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
     final docker = commandConfig.value(StartOption.docker);
 
+    // Listen for termination signals before starting any services so that
+    // a SIGINT at any point triggers graceful shutdown (including Docker
+    // cleanup) rather than killing the process.
+    final shutdown = _ShutdownSignal();
+
     // Start Docker Compose services if needed.
     var startedDocker = false;
     if (docker) {
@@ -133,24 +137,21 @@ class StartCommand extends ServerpodCommand<StartOption> {
     }
 
     try {
+      // If a signal arrived during Docker startup, skip starting the server.
+      if (shutdown.isShutdown) return;
+
       // Extract passthrough args (everything after '--').
       final serverArgs = argResults?.rest ?? [];
 
       final noFes = commandConfig.value(StartOption.noFes);
 
       if (watch) {
-        // Watch mode: the entire loop (generation, compilation, reload)
-        // runs in one long-lived isolate so analyzers persist and can
-        // be updated incrementally on each file change.
-        final logLevel = log.logLevel;
-        final exitCode = await Isolate.run(
-          () => _runWatchMode(
-            config: config,
-            serverDir: serverDir,
-            serverArgs: serverArgs,
-            logLevel: logLevel,
-            noFes: noFes,
-          ),
+        final exitCode = await _runWatchMode(
+          config: config,
+          serverDir: serverDir,
+          serverArgs: serverArgs,
+          shutdownSignal: shutdown.future,
+          noFes: noFes,
         );
         if (exitCode != 0) throw ExitException(exitCode);
       } else {
@@ -173,6 +174,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
         );
       }
     } finally {
+      shutdown.dispose();
       if (startedDocker) {
         await _stopDockerServices(serverDir);
       }
@@ -291,21 +293,17 @@ class StartCommand extends ServerpodCommand<StartOption> {
   }
 }
 
-/// Runs the entire watch-mode loop in a single isolate.
+/// Runs the entire watch-mode loop.
 ///
 /// Analyzers are created once and updated incrementally on each file change,
 /// avoiding the cost of re-initializing them from scratch every time.
-///
-/// Must be a top-level function so the closure passed to [Isolate.run]
-/// doesn't capture unsendable objects from the call site's scope.
 Future<int> _runWatchMode({
   required GeneratorConfig config,
   required String serverDir,
   required List<String> serverArgs,
-  required LogLevel logLevel,
+  required Future<int> shutdownSignal,
   required bool noFes,
 }) async {
-  log.logLevel = logLevel;
   log.info('Starting server in watch mode...');
 
   final serverpodToolDir = p.join(serverDir, '.dart_tool', 'serverpod');
@@ -348,6 +346,7 @@ Future<int> _runWatchMode({
     serverArgs: serverArgs,
     serverpodToolDir: serverpodToolDir,
     vmServiceInfoFile: vmServiceInfoFile,
+    shutdownSignal: shutdownSignal,
     watcher: FileWatcher(
       watchPaths: {
         p.absolute(p.joinAll(config.libSourcePathParts)),
@@ -385,6 +384,7 @@ Future<int> _startWatchSession({
   required List<String> serverArgs,
   required String serverpodToolDir,
   required String vmServiceInfoFile,
+  required Future<int> shutdownSignal,
   required FileWatcher watcher,
   required Set<String> generatedDirPaths,
   required GenerateAction generate,
@@ -470,40 +470,50 @@ Future<int> _startWatchSession({
       )
       .listen((_) {});
 
-  // Wait for SIGINT/SIGTERM or unexpected server exit.
-  final (signal, teardownSignal) = _onTerminationSignal();
-
   if (session.isRunning) log.info(serverRunning);
 
-  final exitCode = await Future.any([signal, session.done]);
+  final exitCode = await Future.any([shutdownSignal, session.done]);
 
   log.info('Server stopped (exitCode: $exitCode).');
 
   // Clean up.
   await fileChangeSub.cancel();
   await session.dispose();
-  await teardownSignal();
 
   return exitCode;
 }
 
-/// Returns a future that completes with 0 when SIGINT or SIGTERM is received,
-/// and a teardown function to cancel the signal subscriptions.
-(Future<int>, Future<void> Function()) _onTerminationSignal() {
-  final completer = Completer<int>();
-  final sigintSub = ProcessSignal.sigint.watch().listen((_) {
-    if (!completer.isCompleted) completer.complete(0);
-  });
-  final sigtermSub = ProcessSignal.sigterm.watch().listen((_) {
-    if (!completer.isCompleted) completer.complete(0);
-  });
-  return (
-    completer.future,
-    () async {
-      await sigintSub.cancel();
-      await sigtermSub.cancel();
-    },
-  );
+/// Listens for SIGINT/SIGTERM and exposes a [future] that completes when
+/// a termination signal is received.
+///
+/// Call [dispose] to cancel the signal subscriptions.
+class _ShutdownSignal {
+  final Completer<int> _completer = Completer<int>();
+  late final StreamSubscription<void> _sigintSub;
+  late final StreamSubscription<void>? _sigtermSub;
+
+  _ShutdownSignal() {
+    _sigintSub = ProcessSignal.sigint.watch().listen(_complete);
+    if (!Platform.isWindows) {
+      _sigtermSub = ProcessSignal.sigterm.watch().listen(_complete);
+    }
+  }
+
+  void _complete(ProcessSignal _) {
+    if (!_completer.isCompleted) _completer.complete(0);
+  }
+
+  /// Whether a termination signal has been received.
+  bool get isShutdown => _completer.isCompleted;
+
+  /// Completes with 0 when a termination signal is received.
+  Future<int> get future => _completer.future;
+
+  /// Cancels the signal subscriptions.
+  void dispose() {
+    _sigintSub.cancel();
+    _sigtermSub?.cancel();
+  }
 }
 
 /// Checks if a server is already running by reading the VM service info file

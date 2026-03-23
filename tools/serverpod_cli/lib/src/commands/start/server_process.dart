@@ -177,7 +177,10 @@ class ServerProcess {
         _vmService = await vmServiceConnectUri(wsUri);
         break;
       } on Exception {
-        if (attempt == maxRetries - 1) rethrow;
+        if (attempt == maxRetries - 1) {
+          log.warning('Could not connect to VM service at $wsUri');
+          return;
+        }
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
     }
