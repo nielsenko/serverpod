@@ -20,6 +20,7 @@ import 'package:serverpod_cli/src/generated/version.dart';
 import 'package:serverpod_cli/src/runner/serverpod_command_runner.dart';
 import 'package:serverpod_cli/src/util/browser_launcher.dart';
 import 'package:serverpod_cli/src/util/internal_error.dart';
+import 'package:serverpod_cli/src/util/isolated_logger.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 
 const _mixPanelToken = '05e8ab306c393c7482e0f41851a176d8';
@@ -126,4 +127,5 @@ ServerpodCommandRunner buildCommandRunner() {
 Future<void> _preExit() async {
   _analytics.cleanUp();
   await log.flush();
+  await (log as IsolatedLogger).close();
 }
