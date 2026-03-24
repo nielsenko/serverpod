@@ -184,7 +184,9 @@ final class IsolatedLogger extends IsolatedObject<StdOutLogger>
 
   @override
   Future<void> close() async {
-    await flush(); // flush before close
-    await super.close();
+    scheduleMicrotask(() async {
+      await flush(); // flush before close, and leave no gap!
+      await super.close();
+    });
   }
 }
