@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:math' as math;
 
 import 'package:cli_tools/cli_tools.dart';
@@ -1083,13 +1082,11 @@ Future<bool> _runGenerateInIsolate(
 }) {
   final serverDirPath = serverDir.path;
   return log.progress('Running serverpod generator', () async {
-    return await Isolate.run(() {
-      CommandLineExperimentalFeatures.initialize(experimentalFeatures);
-      return GenerateFiles.generateFiles(
-        Directory(serverDirPath),
-        interactive: interactive,
-      );
-    });
+    CommandLineExperimentalFeatures.initialize(experimentalFeatures);
+    return await GenerateFiles.generateFiles(
+      Directory(serverDirPath),
+      interactive: interactive,
+    );
   });
 }
 
