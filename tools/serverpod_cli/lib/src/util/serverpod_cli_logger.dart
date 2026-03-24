@@ -119,6 +119,17 @@ abstract class _SeveritySpanHelpers {
   }
 }
 
+/// Shuts down and closes the logger, releasing any isolate resources.
+Future<void> closeLogger() async {
+  final logger = _logger;
+  _logger = null;
+  if (logger == null) return;
+  await logger.flush();
+  if (logger is IsolatedLogger) {
+    await logger.close();
+  }
+}
+
 /// Resets the logger singleton to its initial state.
 void resetLogger() {
   _logger = null;

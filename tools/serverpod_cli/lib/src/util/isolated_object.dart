@@ -30,6 +30,7 @@ class IsolatedObject<T> {
 
     parentPort.handler = (dynamic message) async {
       if (message case final RemoteError e) {
+        parentPort.close();
         setupDone.completeError(e, e.stackTrace);
       } else {
         final toChild = message as SendPort;
@@ -108,9 +109,15 @@ class IsolatedObject<T> {
   }
 
   int _nextId = 0;
+  bool _isClosed = false;
+  bool get isClosed => _isClosed;
 
   /// Evaluates [function] on the isolated object and returns the result.
   Future<U> evaluate<U>(FutureOr<U> Function(T) function) async {
+    if (_isClosed) {
+      throw StateError('IsolatedObject<$T> is closed');
+    }
+
     final (toChild, _, inflight) = await _connected;
 
     final id = _nextId++;
@@ -123,7 +130,19 @@ class IsolatedObject<T> {
 
   /// Shuts down the isolate.
   Future<void> close() async {
-    final (toChild, fromChild, _) = await _connected;
+    if (_isClosed) return;
+    _isClosed = true;
+
+    final (toChild, fromChild, inflight) = await _connected;
+
+    // Fail any outstanding requests.
+    for (final c in inflight.values) {
+      if (!c.isCompleted) {
+        c.completeError(StateError('$runtimeType is closed'));
+      }
+    }
+    inflight.clear();
+
     toChild.send(null);
     fromChild.close();
   }

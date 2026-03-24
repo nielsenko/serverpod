@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cli_tools/cli_tools.dart';
@@ -15,7 +16,8 @@ import 'isolated_object.dart';
 /// Simple log methods fire-and-forget into the isolate. The [progress] method
 /// runs the spinner in the isolate while executing the work callback in the
 /// calling isolate.
-class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
+final class IsolatedLogger extends IsolatedObject<StdOutLogger>
+    implements Logger {
   /// Holds a reference to the active [Progress] inside the logger isolate.
   /// This is a static field so it's accessible from evaluate closures that
   /// run in the isolate. Each isolate has its own copy of static state.
@@ -32,6 +34,11 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
   @override
   int? get wrapTextColumn => stdout.hasTerminal ? stdout.terminalColumns : null;
 
+  void _voidEvaluate(void Function(StdOutLogger) function) async {
+    if (isClosed) return; // ignore trace after close
+    await evaluate(function);
+  }
+
   LogLevel _logLevel;
   @override
   LogLevel get logLevel => _logLevel;
@@ -39,7 +46,7 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
   set logLevel(LogLevel level) => _setLogLevel(level);
   void _setLogLevel(LogLevel level) async {
     await evaluate((l) => l.logLevel = level);
-    _logLevel = level;
+    _logLevel = level; // don't set until in effect
   }
 
   @override
@@ -47,8 +54,8 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
     String message, {
     bool newParagraph = false,
     LogType type = TextLogType.normal,
-  }) async {
-    await evaluate(
+  }) {
+    _voidEvaluate(
       (l) => l.debug(message, newParagraph: newParagraph, type: type),
     );
   }
@@ -58,8 +65,8 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
     String message, {
     bool newParagraph = false,
     LogType type = TextLogType.normal,
-  }) async {
-    await evaluate(
+  }) {
+    _voidEvaluate(
       (l) => l.info(message, newParagraph: newParagraph, type: type),
     );
   }
@@ -69,8 +76,8 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
     String message, {
     bool newParagraph = false,
     LogType type = TextLogType.normal,
-  }) async {
-    await evaluate(
+  }) {
+    _voidEvaluate(
       (l) => l.warning(message, newParagraph: newParagraph, type: type),
     );
   }
@@ -81,8 +88,8 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
     bool newParagraph = false,
     StackTrace? stackTrace,
     LogType type = TextLogType.normal,
-  }) async {
-    await evaluate(
+  }) {
+    _voidEvaluate(
       (l) => l.error(
         message,
         newParagraph: newParagraph,
@@ -98,8 +105,8 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
     LogLevel level, {
     bool newParagraph = false,
     LogType type = TextLogType.normal,
-  }) async {
-    await evaluate(
+  }) {
+    _voidEvaluate(
       (l) => l.log(message, level, newParagraph: newParagraph, type: type),
     );
   }
@@ -110,8 +117,8 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
     LogLevel logLevel, {
     bool newParagraph = false,
     bool newLine = true,
-  }) async {
-    await evaluate(
+  }) {
+    _voidEvaluate(
       (l) => l.write(
         message,
         logLevel,
@@ -174,4 +181,10 @@ class IsolatedLogger extends IsolatedObject<StdOutLogger> implements Logger {
 
   @override
   Future<void> flush() => evaluate((l) => l.flush());
+
+  @override
+  Future<void> close() async {
+    await flush(); // flush before close
+    await super.close();
+  }
 }

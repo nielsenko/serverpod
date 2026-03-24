@@ -162,7 +162,7 @@ Future<bool> performCreate(
     });
   }
 
-  success &= await _runGenerateInIsolate(
+  success &= await _runGenerate(
     serverpodDirs.serverDir,
     CommandLineExperimentalFeatures.instance.features,
     interactive: interactive,
@@ -284,7 +284,7 @@ Future<bool> _performUpgrade(
     },
   );
 
-  success &= await _runGenerateInIsolate(
+  success &= await _runGenerate(
     serverpodDir.serverDir,
     CommandLineExperimentalFeatures.instance.features,
     interactive: interactive,
@@ -1075,7 +1075,7 @@ void _copyModuleTemplates(
   );
 }
 
-Future<bool> _runGenerateInIsolate(
+Future<bool> _runGenerate(
   Directory serverDir,
   List<ExperimentalFeature> experimentalFeatures, {
   required bool? interactive,
