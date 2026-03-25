@@ -470,14 +470,21 @@ Future<int> _startWatchSession({
   );
 
   // Start MCP socket server for AI agent integration.
-  final mcpSocketPath = p.join(serverpodToolDir, 'mcp.sock');
-  final mcpSocket = McpSocketServer(socketPath: mcpSocketPath);
-  try {
-    await mcpSocket.start();
-    mcpSocket.connect(onApplyMigration: session.applyMigration);
-    log.info('MCP server listening on ${mcpSocket.socketPath}');
-  } on SocketException catch (e) {
-    log.warning('Failed to start MCP server: $e');
+  // Only available when using the built-in compiler (not --no-fes), since all
+  // current MCP tools require the compiler and process lifecycle.
+  McpSocketServer? mcpSocket;
+  if (!noFes) {
+    mcpSocket = McpSocketServer(
+      socketPath: p.join(serverpodToolDir, 'mcp.sock'),
+    );
+    try {
+      await mcpSocket.start();
+      mcpSocket.connect(onApplyMigration: session.applyMigration);
+      log.info('MCP server listening on ${mcpSocket.socketPath}');
+    } on SocketException catch (e) {
+      log.warning('Failed to start MCP server: $e');
+      mcpSocket = null;
+    }
   }
 
   final fileChangeSub = watcher.onFilesChanged
@@ -494,7 +501,7 @@ Future<int> _startWatchSession({
 
   // Clean up.
   await fileChangeSub.cancel();
-  await mcpSocket.close();
+  await mcpSocket?.close();
   await session.dispose();
 
   return exitCode;
