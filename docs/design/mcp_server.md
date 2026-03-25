@@ -38,6 +38,19 @@ MCP client  ──stdio──>  serverpod mcp  ──unix socket──>  CLI pro
 
 The command auto-detects the server directory the same way `serverpod start` does, and supports `--directory` / `-d` to specify it explicitly.
 
+Example MCP config (Claude Code: `.mcp.json`, Cursor: `.cursor/mcp.json`)):
+
+```json
+{
+  "mcpServers": {
+    "serverpod": {
+      "command": "serverpod",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
 ### `apply_migration` tool
 
 Restarts the server subprocess with `--apply-migrations` added to its arguments. This is a one-shot flag - subsequent restarts and reloads use the original args.
