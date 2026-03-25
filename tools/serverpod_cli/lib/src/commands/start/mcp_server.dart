@@ -1,4 +1,5 @@
 import 'package:dart_mcp/server.dart';
+import 'package:serverpod_cli/src/generated/version.dart';
 
 /// MCP server that exposes serverpod dev tools.
 ///
@@ -10,12 +11,13 @@ base class ServerpodMcpServer extends MCPServer with ToolsSupport {
 
   ServerpodMcpServer(super.channel)
     : super.fromStreamChannel(
-        implementation: Implementation(name: 'serverpod', version: '0.1.0'),
+        implementation: Implementation(
+          name: 'serverpod',
+          version: templateVersion,
+        ),
         instructions:
-            'Serverpod dev server. Use the apply_migration tool to apply '
-            'pending database migrations. The server will restart with '
-            '--apply-migrations and then clear the flag for subsequent '
-            'hot reloads.',
+            'MCP server inside the Serverpod CLI, active during `serverpod start --watch`. '
+            "Exposes tools for operations that require the CLI process's internal state.",
       ) {
     registerTool(_applyMigrationTool, _applyMigration);
   }
@@ -23,9 +25,7 @@ base class ServerpodMcpServer extends MCPServer with ToolsSupport {
   static final _applyMigrationTool = Tool(
     name: 'apply_migration',
     description:
-        'Apply pending database migrations. Restarts the server with '
-        '--apply-migrations (one-shot - subsequent reloads will not '
-        're-apply).',
+        'Apply pending database migrations. Restarts the server with --apply-migrations.',
     inputSchema: Schema.object(),
   );
 
@@ -44,8 +44,7 @@ base class ServerpodMcpServer extends MCPServer with ToolsSupport {
         content: [
           TextContent(
             text:
-                'Migration applied. Server restarted with '
-                '--apply-migrations.',
+                'Migration applied. Server restarted with --apply-migrations.',
           ),
         ],
       );

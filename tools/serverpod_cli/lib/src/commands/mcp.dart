@@ -33,7 +33,8 @@ class McpCommand extends ServerpodCommand<McpOption> {
   final name = 'mcp';
 
   @override
-  final description = 'Connect to a running serverpod instance via MCP.';
+  final description =
+      "Create stdio bridge to a running `serverpod start --watch` process's MCP server.";
 
   @override
   String get invocation => 'serverpod mcp';

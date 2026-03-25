@@ -85,7 +85,7 @@ Future MCP tool candidates include `server_status` (only the CLI knows whether t
 ## Dependencies
 
 - `dart_mcp: ^0.4.x` - MCP server base class, tools/resources support.
-- `stream_channel` - bidirectional stream abstraction (likely already a transitive dep).
+- `stream_channel` - bidirectional stream abstraction.
 
 ## Open Questions
 

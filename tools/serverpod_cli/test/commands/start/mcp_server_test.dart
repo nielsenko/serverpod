@@ -65,62 +65,66 @@ void main() {
       },
     );
 
-    test(
-      'when calling apply_migration without a connected callback, '
-      'then it returns an error',
-      () async {
-        final result = await connection.callTool(
-          CallToolRequest(name: 'apply_migration'),
-        );
+    group('Given no connected callback', () {
+      test(
+        'when calling apply_migration, '
+        'then it returns an error',
+        () async {
+          final result = await connection.callTool(
+            CallToolRequest(name: 'apply_migration'),
+          );
 
-        expect(result.isError, isTrue);
-        expect(
-          (result.content.first as TextContent).text,
-          contains('not connected'),
-        );
-      },
-    );
+          expect(result.isError, isTrue);
+          expect(
+            (result.content.first as TextContent).text,
+            contains('not connected'),
+          );
+        },
+      );
+    });
 
-    test(
-      'when calling apply_migration with a connected callback, '
-      'then it invokes the callback and returns success',
-      () async {
-        var called = false;
-        server.onApplyMigration = () async {
-          called = true;
-        };
+    group('Given a connected callback', () {
+      test(
+        'when calling apply_migration, '
+        'then it invokes the callback and returns success',
+        () async {
+          var called = false;
+          server.onApplyMigration = () async {
+            called = true;
+          };
 
-        final result = await connection.callTool(
-          CallToolRequest(name: 'apply_migration'),
-        );
+          final result = await connection.callTool(
+            CallToolRequest(name: 'apply_migration'),
+          );
 
-        expect(called, isTrue);
-        expect(result.isError, isNull);
-        expect(
-          (result.content.first as TextContent).text,
-          contains('Migration applied'),
-        );
-      },
-    );
+          expect(called, isTrue);
+          expect(result.isError, isNull);
+          expect(
+            (result.content.first as TextContent).text,
+            contains('Migration applied'),
+          );
+        },
+      );
 
-    test(
-      'when the callback throws, '
-      'then it returns an error with the message',
-      () async {
-        server.onApplyMigration = () async {
-          throw Exception('database locked');
-        };
+      test(
+        'when the callback throws, '
+        'then it returns an error with the message',
+        () async {
+          server.onApplyMigration = () async {
+            throw Exception('database locked');
+          };
 
-        final result = await connection.callTool(
-          CallToolRequest(name: 'apply_migration'),
-        );
+          final result = await connection.callTool(
+            CallToolRequest(name: 'apply_migration'),
+          );
 
-        expect(result.isError, isTrue);
-        expect(
-          (result.content.first as TextContent).text,
-          contains('database locked'),
-        );
-      },
-    );
+          expect(result.isError, isTrue);
+          expect(
+            (result.content.first as TextContent).text,
+            contains('database locked'),
+          );
+        },
+      );
+    });
   });
 }
