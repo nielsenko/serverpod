@@ -3,19 +3,11 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/commands/start/mcp_socket.dart';
+import 'package:serverpod_cli/src/util/platform_check.dart';
 import 'package:test/test.dart';
 
-/// Unix domain sockets require Dart 3.11+ on Windows.
-bool get _skipOnWindows {
-  if (!Platform.isWindows) return false;
-  final parts = Platform.version.split(' ').first.split('.');
-  final major = int.parse(parts[0]);
-  final minor = int.parse(parts[1]);
-  return major < 3 || (major == 3 && minor < 11);
-}
-
 void main() {
-  group('Given an McpSocketServer', skip: _skipOnWindows, () {
+  group('Given an McpSocketServer', skip: !hasUnixSocketSupport(), () {
     late Directory tmpDir;
     late McpSocketServer server;
 
@@ -100,4 +92,30 @@ void main() {
       },
     );
   });
+
+  group(
+    'Given Windows with Dart < 3.11',
+    skip: hasUnixSocketSupport(),
+    () {
+      test(
+        'when starting an McpSocketServer, '
+        'then it throws a SocketException',
+        () async {
+          final server = McpSocketServer(socketPath: 'mcp.sock');
+          expect(server.start(), throwsA(isA<SocketException>()));
+        },
+      );
+
+      test(
+        'when calling requireUnixSocketSupport, '
+        'then it throws a SocketException',
+        () {
+          expect(
+            requireUnixSocketSupport,
+            throwsA(isA<SocketException>()),
+          );
+        },
+      );
+    },
+  );
 }

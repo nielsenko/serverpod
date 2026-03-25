@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/runner/serverpod_command.dart';
 import 'package:serverpod_cli/src/runner/serverpod_command_runner.dart';
+import 'package:serverpod_cli/src/util/platform_check.dart';
 
 /// Options for the `mcp` command.
 enum McpOption<V> implements OptionDefinition<V> {
@@ -52,6 +53,8 @@ class McpCommand extends ServerpodCommand<McpOption> {
 
   @override
   Future<void> runWithConfig(Configuration<McpOption> commandConfig) async {
+    requireUnixSocketSupport();
+
     final directory = commandConfig.value(McpOption.directory);
 
     final interactive = serverpodRunner.globalConfiguration.optionalValue(

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:serverpod_cli/src/util/platform_check.dart';
 import 'package:stream_channel/stream_channel.dart';
 
 import 'mcp_server.dart';
@@ -28,6 +29,8 @@ class McpSocketServer {
 
   /// Start listening for connections.
   Future<void> start() async {
+    requireUnixSocketSupport();
+
     // Clean up stale socket file if it exists.
     if (FileSystemEntity.typeSync(socketPath) !=
         FileSystemEntityType.notFound) {
