@@ -51,11 +51,11 @@ Example MCP config (Claude Code: `.mcp.json`, Cursor: `.cursor/mcp.json`)):
 }
 ```
 
-### `apply_migration` tool
+### `apply_migrations` tool
 
 Restarts the server subprocess with `--apply-migrations` added to its arguments. This is a one-shot flag - subsequent restarts and reloads use the original args.
 
-When an MCP client calls `apply_migration`:
+When an MCP client calls `apply_migrations`:
 
 1. The watch session resets the compiler and does a full compile.
 1. The server subprocess is stopped and restarted with `--apply-migrations` appended.
@@ -69,11 +69,11 @@ When an MCP client calls `apply_migration`:
 
 ### MCP server
 
-`ServerpodMcpServer` extends `MCPServer` (from the `dart_mcp` package) with the `ToolsSupport` mixin. It registers the `apply_migration` tool with a callback into the `WatchSession`.
+`ServerpodMcpServer` extends `MCPServer` (from the `dart_mcp` package) with the `ToolsSupport` mixin. It registers the `apply_migrations` tool with a callback into the `WatchSession`.
 
 ### Integration with watch mode
 
-In `_startWatchSession()` (start.dart), the MCP socket server is created with a socket path under `serverpodToolDir`. The `apply_migration` callback is wired to `WatchSession.applyMigration`. The socket is cleaned up on exit.
+In `_startWatchSession()` (start.dart), the MCP socket server is created with a socket path under `serverpodToolDir`. The `apply_migrations` callback is wired to `WatchSession.applyMigration`. The socket is cleaned up on exit.
 
 ### One-shot migration flag
 
