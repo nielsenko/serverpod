@@ -16,20 +16,22 @@ base class ServerpodMcpServer extends MCPServer with ToolsSupport {
           version: templateVersion,
         ),
         instructions:
-            'MCP server inside the Serverpod CLI, active during `serverpod start --watch`. '
-            "Exposes tools for operations that require the CLI process's internal state.",
+            'Manage a running Serverpod server process started by '
+            '`serverpod start --watch`.',
       ) {
-    registerTool(_applyMigrationTool, _applyMigration);
+    registerTool(_applyMigrationsTool, _applyMigrations);
   }
 
-  static final _applyMigrationTool = Tool(
-    name: 'apply_migration',
+  static final _applyMigrationsTool = Tool(
+    name: 'apply_migrations',
     description:
-        'Apply pending database migrations. Restarts the server with --apply-migrations.',
+        'Apply pending database migrations. The server restarts with '
+        '`--apply-migrations`. Call after creating a migration with '
+        '`serverpod create-migration`.',
     inputSchema: Schema.object(),
   );
 
-  Future<CallToolResult> _applyMigration(CallToolRequest request) async {
+  Future<CallToolResult> _applyMigrations(CallToolRequest request) async {
     final callback = onApplyMigration;
     if (callback == null) {
       return CallToolResult(
@@ -44,13 +46,14 @@ base class ServerpodMcpServer extends MCPServer with ToolsSupport {
         content: [
           TextContent(
             text:
-                'Migration applied. Server restarted with --apply-migrations.',
+                'Migrations applied. The database schema now matches the '
+                'latest migration definitions.',
           ),
         ],
       );
     } catch (e) {
       return CallToolResult(
-        content: [TextContent(text: 'Failed to apply migration: $e')],
+        content: [TextContent(text: 'Failed to apply migrations: $e')],
         isError: true,
       );
     }

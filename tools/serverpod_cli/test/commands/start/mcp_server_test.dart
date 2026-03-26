@@ -56,22 +56,22 @@ void main() {
 
     test(
       'when listing tools, '
-      'then apply_migration is available',
+      'then apply_migrations is available',
       () async {
         final result = await connection.listTools();
 
         expect(result.tools, hasLength(1));
-        expect(result.tools.first.name, 'apply_migration');
+        expect(result.tools.first.name, 'apply_migrations');
       },
     );
 
     group('Given no connected callback', () {
       test(
-        'when calling apply_migration, '
+        'when calling apply_migrations, '
         'then it returns an error',
         () async {
           final result = await connection.callTool(
-            CallToolRequest(name: 'apply_migration'),
+            CallToolRequest(name: 'apply_migrations'),
           );
 
           expect(result.isError, isTrue);
@@ -85,7 +85,7 @@ void main() {
 
     group('Given a connected callback', () {
       test(
-        'when calling apply_migration, '
+        'when calling apply_migrations, '
         'then it invokes the callback and returns success',
         () async {
           var called = false;
@@ -94,14 +94,14 @@ void main() {
           };
 
           final result = await connection.callTool(
-            CallToolRequest(name: 'apply_migration'),
+            CallToolRequest(name: 'apply_migrations'),
           );
 
           expect(called, isTrue);
           expect(result.isError, isNull);
           expect(
             (result.content.first as TextContent).text,
-            contains('Migration applied'),
+            contains('Migrations applied'),
           );
         },
       );
@@ -115,7 +115,7 @@ void main() {
           };
 
           final result = await connection.callTool(
-            CallToolRequest(name: 'apply_migration'),
+            CallToolRequest(name: 'apply_migrations'),
           );
 
           expect(result.isError, isTrue);
