@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/util/platform_check.dart';
 import 'package:stream_channel/stream_channel.dart';
 
@@ -29,22 +28,7 @@ class McpSocketServer {
 
   /// Start listening for connections.
   Future<void> start() async {
-    requireUnixSocketSupport();
-
-    // Clean up stale socket file if it exists.
-    if (FileSystemEntity.typeSync(socketPath) !=
-        FileSystemEntityType.notFound) {
-      File(socketPath).deleteSync();
-    }
-
-    // Use the shorter of absolute or relative path to stay within the Unix
-    // domain socket path length limit (104 bytes on macOS, 108 on Linux).
-    final bindPath = _shortestPath(socketPath);
-    _serverSocket = await ServerSocket.bind(
-      InternetAddress(bindPath, type: InternetAddressType.unix),
-      0,
-    );
-
+    _serverSocket = await bindUnixSocket(socketPath);
     _serverSocket!.listen(_handleConnection);
   }
 
@@ -135,13 +119,4 @@ StreamChannel<String> _socketChannel(Socket socket) {
   );
 
   return StreamChannel<String>(inStream, outController.sink);
-}
-
-/// Returns the shorter of the absolute or relative form of [path].
-///
-/// Unix domain sockets have a path length limit (104 bytes on macOS, 108 on
-/// Linux). Using a relative path helps when the project is deeply nested.
-String _shortestPath(String path) {
-  final relative = p.relative(path);
-  return relative.length < path.length ? relative : path;
 }

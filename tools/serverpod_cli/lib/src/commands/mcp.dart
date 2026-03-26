@@ -53,8 +53,6 @@ class McpCommand extends ServerpodCommand<McpOption> {
 
   @override
   Future<void> runWithConfig(Configuration<McpOption> commandConfig) async {
-    requireUnixSocketSupport();
-
     final directory = commandConfig.value(McpOption.directory);
 
     final interactive = serverpodRunner.globalConfiguration.optionalValue(
@@ -87,16 +85,9 @@ class McpCommand extends ServerpodCommand<McpOption> {
       throw ExitException.error();
     }
 
-    // Use the shorter of absolute or relative path to stay within the Unix
-    // domain socket path length limit (104 bytes on macOS, 108 on Linux).
-    final connectPath = _shortestPath(socketPath);
-
     Socket socket;
     try {
-      socket = await Socket.connect(
-        InternetAddress(connectPath, type: InternetAddressType.unix),
-        0,
-      );
+      socket = await connectUnixSocket(socketPath);
     } on SocketException {
       stderr.writeln(
         'No running serverpod watch instance found.\n'
@@ -121,13 +112,4 @@ class McpCommand extends ServerpodCommand<McpOption> {
       await stdinSub.cancel();
     }
   }
-}
-
-/// Returns the shorter of the absolute or relative form of [path].
-///
-/// Unix domain sockets have a path length limit (104 bytes on macOS, 108 on
-/// Linux). Using a relative path helps when the project is deeply nested.
-String _shortestPath(String path) {
-  final relative = p.relative(path);
-  return relative.length < path.length ? relative : path;
 }

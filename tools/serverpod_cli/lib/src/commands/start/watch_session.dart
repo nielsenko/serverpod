@@ -265,6 +265,15 @@ class WatchSession {
     }
     compiler.accept();
 
+    switch (_state) {
+      case SessionState.idle:
+        break; // proceed
+      case SessionState.restarting:
+      case SessionState.applyingMigration:
+      case SessionState.disposed:
+        return;
+    }
+
     _state = SessionState.restarting;
     try {
       await _server.stop();
@@ -282,8 +291,15 @@ class WatchSession {
   /// compiler is not available (--no-fes mode). Throws on compilation failure
   /// so the caller (MCP server) can report the error to the client.
   Future<void> applyMigration() async {
-    if (_state == SessionState.applyingMigration) {
-      throw StateError('Migration already in progress.');
+    switch (_state) {
+      case SessionState.idle:
+        break; // proceed
+      case SessionState.restarting:
+        throw StateError('Migration or restart already in progress.');
+      case SessionState.applyingMigration:
+        throw StateError('Migration already in progress.');
+      case SessionState.disposed:
+        throw StateError('Session has been disposed.');
     }
 
     final createServer = _createServer;

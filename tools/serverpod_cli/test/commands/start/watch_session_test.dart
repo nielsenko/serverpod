@@ -674,6 +674,27 @@ void main() {
     );
   });
 
+  group('Given applyMigration is called after dispose', () {
+    test(
+      'when applyMigration is called, '
+      'then it throws a StateError with disposed message',
+      () async {
+        await session.dispose();
+
+        await expectLater(
+          session.applyMigration(),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('disposed'),
+            ),
+          ),
+        );
+      },
+    );
+  });
+
   group('Given dispose is called', () {
     test(
       'when disposing, '
