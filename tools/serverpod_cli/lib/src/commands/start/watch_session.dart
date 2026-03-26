@@ -80,6 +80,10 @@ class WatchSession {
   ServerProcess _server;
   SessionState _state = SessionState.idle;
 
+  /// Serializes restart and migration operations. Each operation chains onto
+  /// the previous one via [_pending], so concurrent calls execute in order.
+  Future<void> _pending = Future.value();
+
   WatchSession({
     KernelCompiler? compiler,
     required GenerateAction generate,
@@ -274,32 +278,18 @@ class WatchSession {
         return;
     }
 
-    _state = SessionState.restarting;
-    try {
-      await _server.stop();
-      _server = await _createServer!(fullResult.dillOutput!);
-      _monitorExit(_server);
-      log.info(serverRestarted);
-    } finally {
-      _state = SessionState.idle;
-    }
+    await _restartServer(fullResult.dillOutput!);
   }
 
   /// Restarts the server with `--apply-migrations` (one-shot).
   ///
-  /// Throws a [StateError] if a migration is already in progress or if the
-  /// compiler is not available (--no-fes mode). Throws on compilation failure
-  /// so the caller (MCP server) can report the error to the client.
-  Future<void> applyMigration() async {
-    switch (_state) {
-      case SessionState.idle:
-        break; // proceed
-      case SessionState.restarting:
-        throw StateError('Migration or restart already in progress.');
-      case SessionState.applyingMigration:
-        throw StateError('Migration already in progress.');
-      case SessionState.disposed:
-        throw StateError('Session has been disposed.');
+  /// If another restart or migration is in progress, this call waits for it
+  /// to finish before proceeding. Throws a [StateError] if the session has
+  /// been disposed or the compiler is not available (--no-fes mode). Throws
+  /// on compilation failure so the caller (MCP server) can report the error.
+  Future<void> applyMigration() {
+    if (_state == SessionState.disposed) {
+      throw StateError('Session has been disposed.');
     }
 
     final createServer = _createServer;
@@ -309,6 +299,18 @@ class WatchSession {
         'Cannot apply migrations in --no-fes mode. '
         'Restart the server manually with --apply-migrations.',
       );
+    }
+
+    _pending = _pending.then((_) => _applyMigration(compiler, createServer));
+    return _pending;
+  }
+
+  Future<void> _applyMigration(
+    KernelCompiler compiler,
+    ServerProcessFactory createServer,
+  ) async {
+    if (_state == SessionState.disposed) {
+      throw StateError('Session has been disposed.');
     }
 
     _state = SessionState.applyingMigration;
@@ -332,6 +334,18 @@ class WatchSession {
       );
       _monitorExit(_server);
       log.info('Server restarted with --apply-migrations.');
+    } finally {
+      _state = SessionState.idle;
+    }
+  }
+
+  Future<void> _restartServer(String dillPath) async {
+    _state = SessionState.restarting;
+    try {
+      await _server.stop();
+      _server = await _createServer!(dillPath);
+      _monitorExit(_server);
+      log.info(serverRestarted);
     } finally {
       _state = SessionState.idle;
     }

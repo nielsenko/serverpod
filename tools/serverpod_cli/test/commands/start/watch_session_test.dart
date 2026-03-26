@@ -681,8 +681,8 @@ void main() {
       () async {
         await session.dispose();
 
-        await expectLater(
-          session.applyMigration(),
+        expect(
+          session.applyMigration,
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
