@@ -5,8 +5,7 @@ import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/analyzer/models/stateful_analyzer.dart';
 import 'package:serverpod_cli/src/commands/generate.dart';
 import 'package:serverpod_cli/src/generator/code_generation_collector.dart';
-import 'package:serverpod_cli/src/generator/code_generator.dart';
-import 'package:serverpod_cli/src/generator/dart/library_generators/model_library_generator.dart';
+import 'package:serverpod_cli/src/generator/dart/temp_protocol_generator.dart';
 import 'package:serverpod_cli/src/generator/generation_staleness.dart';
 import 'package:serverpod_cli/src/generator/serverpod_code_generator.dart';
 import 'package:serverpod_cli/src/util/analysis_helpers.dart';
@@ -280,18 +279,11 @@ Future<String> _writeTemporaryProtocol({
   required List<SerializableModelDefinition> models,
   required GeneratorConfig config,
 }) async {
-  var protocolPath = p.joinAll([
-    ...config.generatedServeModelPathParts,
-    'protocol.dart',
-  ]);
+  var generatedTempProtocol = const DartTemporaryProtocolGenerator()
+      .generateSerializableModelsCode(models: models, config: config);
 
-  var serverSideGenerator = SerializableModelLibraryGenerator(
-    serverCode: true,
-    config: config,
-  );
-  var content = serverSideGenerator
-      .generateTemporaryProtocol(models: models)
-      .generateCode();
+  var protocolPath = generatedTempProtocol.keys.first;
+  var content = generatedTempProtocol.values.first;
 
   var file = File(protocolPath);
   await file.create(recursive: true);
