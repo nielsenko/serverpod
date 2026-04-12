@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod/src/server/dev_auto_refresh_script.dart';
 import 'package:serverpod/src/server/diagnostic_events/diagnostic_events.dart';
+import 'package:serverpod/src/server/log_manager/logger.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 import 'package:serverpod/src/server/session.dart';
 
@@ -194,25 +195,23 @@ class WebServer {
     );
   }
 
-  /// Logs an error to stderr.
+  /// Logs an error.
   void logError(Object e, {StackTrace? stackTrace}) {
-    var now = DateTime.now().toUtc();
-    stderr.writeln('$now WebServer ERROR: $e');
-    if (stackTrace != null) {
-      stderr.writeln('$stackTrace');
-    }
+    serverpod.log.error(
+      'WebServer: $e',
+      error: e is Exception ? e : null,
+      stackTrace: stackTrace,
+    );
   }
 
-  /// Logs an info message to stdout.
+  /// Logs an info message.
   void logInfo(String msg) {
-    var now = DateTime.now().toUtc();
-    stdout.writeln('$now WebServer  INFO: $msg');
+    serverpod.log.info('WebServer: $msg');
   }
 
-  /// Logs a debug message to stdout.
+  /// Logs a debug message.
   void logDebug(String msg) {
-    var now = DateTime.now().toUtc();
-    stdout.writeln('$now WebServer DEBUG: $msg');
+    serverpod.log.debug('WebServer: $msg');
   }
 
   FutureOr<Result> _devStaticChangeCount(Request _) {

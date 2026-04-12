@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:serverpod/src/server/log_manager/log.dart';
+import 'package:serverpod/src/server/serverpod.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 import 'run_mode.dart';
@@ -46,7 +48,11 @@ class CommandLineArgs {
 
   /// Parses the command line arguments passed to Serverpod and creates a
   /// [CommandLineArgs] object.
-  CommandLineArgs(List<String> args) {
+  ///
+  /// If [log] is provided, parse failures are reported through it; otherwise
+  /// they fall back to stdout. Tests can construct this without a Serverpod
+  /// instance by simply omitting [log].
+  CommandLineArgs(List<String> args, {Log? log}) {
     try {
       var argParser = ArgParser()
         ..addOption(
@@ -106,9 +112,13 @@ class CommandLineArgs {
           ? results['apply-repair-migration']
           : null;
     } catch (e) {
-      stdout.writeln(
-        'Failed to parse command line arguments. Using default values. $e',
-      );
+      final message =
+          'Failed to parse command line arguments. Using default values. $e';
+      if (log != null) {
+        log.warning(message);
+      } else {
+        stdout.writeln(message);
+      }
       _runMode = null;
       _serverId = null;
       _loggingMode = null;

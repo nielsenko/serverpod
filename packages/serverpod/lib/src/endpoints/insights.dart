@@ -4,6 +4,8 @@ import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod/src/database/server_migration_manager.dart';
 import 'package:serverpod/src/hot_reload/hot_reload.dart';
 import 'package:serverpod/src/server/health_check.dart';
+import 'package:serverpod/src/server/log_manager/logger.dart';
+import 'package:serverpod/src/server/serverpod.dart' as svp;
 import 'package:serverpod/src/util/path_util.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
@@ -194,7 +196,7 @@ class InsightsEndpoint extends Endpoint {
   /// Performs a hot reload of the server.
   Future<bool> hotReload(Session session) async {
     if (!await HotReloader.isHotReloadAvailable()) {
-      stderr.writeln(
+      server.serverpod.log.error(
         'Hot reload is not available. You need to run dart with --enable-vm-service.',
       );
       return false;
@@ -370,7 +372,7 @@ Future<List<DatabaseMigrationVersion>> _getInstalledMigrationVersions(
     return await DatabaseMigrationVersion.db.find(session);
   } catch (e) {
     // Ignore if the table does not exist.
-    stderr.writeln('Failed to get installed migrations: $e');
+    svp.Serverpod.instance.log.error('Failed to get installed migrations: $e');
     return [];
   }
 }

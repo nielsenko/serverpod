@@ -48,6 +48,7 @@ class StdioTextWriterDelegate implements TextWriterDelegate {
 /// In the CLI, the delegate wraps a `cli_tools.Logger` (StdOutLogger
 /// or IsolatedLogger) for ANSI formatting and progress spinners.
 /// In the server, the default [StdioTextWriterDelegate] writes plain text.
+///
 class TextWriter extends LogWriter {
   final TextWriterDelegate _delegate;
 

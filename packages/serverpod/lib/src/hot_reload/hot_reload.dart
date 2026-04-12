@@ -1,6 +1,7 @@
 import 'dart:developer' as dev;
-import 'dart:io';
 
+import 'package:serverpod/src/server/log_manager/logger.dart';
+import 'package:serverpod/src/server/serverpod.dart';
 import 'package:vm_service/utils.dart' as vms_utils;
 import 'package:vm_service/vm_service.dart' as vms;
 import 'package:vm_service/vm_service_io.dart' as vms_io;
@@ -39,19 +40,21 @@ class HotReloader {
     var report = await vmService.reloadSources(mainIsolate.id!);
 
     if (report.success ?? false) {
-      stdout.writeln('Performed hot reload');
+      Serverpod.instance.log.info('Performed hot reload');
       return true;
     } else {
-      stderr.writeln('Failed to perform hot reload');
-
       if (report.json!['type'] == 'ReloadReport') {
         List notices = report.json!['notices'];
         for (var notice in notices) {
           notice as Map;
-          stderr.writeln(notice['message']);
+          Serverpod.instance.log.error(
+            'Hot reload failed: ${notice['message']}',
+          );
         }
       } else {
-        stderr.writeln(report.json);
+        Serverpod.instance.log.error(
+          'Failed to perform hot reload: ${report.json}',
+        );
       }
       return false;
     }

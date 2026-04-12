@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod/src/server/features.dart';
 import 'package:serverpod/src/server/log_manager/log_manager.dart';
+import 'package:serverpod/src/server/log_manager/logger.dart';
 import 'package:serverpod/src/server/log_manager/log_settings.dart';
 import 'package:serverpod/src/server/log_manager/log_writers.dart';
 import 'package:serverpod/src/server/log_manager/vm_service_log_writer.dart';
@@ -256,8 +256,11 @@ abstract class Session implements DatabaseSession {
         authenticatedUserId: _authenticated?.userIdentifier,
       );
     } catch (e, stackTrace) {
-      stderr.writeln('Failed to close session: $e');
-      stderr.writeln('$stackTrace');
+      serverpod.log.error(
+        'Failed to close session: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
     return null;
   }

@@ -1,9 +1,12 @@
 import 'dart:async';
-import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_database/serverpod_database.dart';
+import 'package:serverpod/src/server/log_manager/log_types.dart' as log_types;
+import 'package:serverpod/src/server/log_manager/logger.dart' as log_api;
+import 'package:serverpod/src/server/log_manager/writers/vm_service_writer.dart';
+import 'package:serverpod/src/server/log_manager/writers/text_writer.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
 import 'package:serverpod/src/database/server_migration_manager.dart';
@@ -37,6 +40,9 @@ typedef HealthCheckHandler =
 class Serverpod {
   static Serverpod? _instance;
 
+  /// The framework logger. Routes messages through the [LogWriter] chain.
+  late final log_api.Logger log;
+
   late Session _internalSession;
 
   late Session _internalLoggingSession;
@@ -60,14 +66,8 @@ class Serverpod {
 
   void _writeLifecycleMessage(String message) {
     if (_shouldPrintLifecycleMessages) {
-      stdout.writeln(message);
+      log.info(message);
     }
-    developer.postEvent('ext.serverpod.log', {
-      'type': 'log',
-      'level': 'info',
-      'message': message,
-      'timestamp': DateTime.now().toUtc().toIso8601String(),
-    });
   }
 
   /// The last created [Serverpod]. In most cases the [Serverpod] is a singleton
@@ -446,7 +446,7 @@ class Serverpod {
       );
     } on ExitException catch (e) {
       if (e.message.isNotEmpty) {
-        stderr.writeln(e.message);
+        log.error(e.message);
       }
       exit(e.exitCode);
     } catch (e, stackTrace) {
@@ -459,12 +459,23 @@ class Serverpod {
     List<String> args, {
     ServerpodConfig? config,
   }) {
+    // Set the singleton early so anything Serverpod's own constructor
+    // touches (e.g. CommandLineArgs warning on parse failure) can reach
+    // [Serverpod.instance].
+    _instance = this;
+
+    // Initialize logger early so _writeLifecycleMessage works immediately.
+    log = log_api.Logger(
+      log_types.MultiLogWriter([TextWriter(), VmServiceWriter()]),
+      logLevel: log_types.LogLevel.info,
+    );
+
     _writeLifecycleMessage(
       'SERVERPOD version: $serverpodVersion, dart: ${Platform.version}, time: ${DateTime.now().toUtc()}',
     );
 
     // Read command line arguments.
-    _commandLineArgs = CommandLineArgs(args);
+    _commandLineArgs = CommandLineArgs(args, log: log);
 
     final {
       CliArgsConstants.runMode: String? runModeFromCommandLine,
@@ -544,7 +555,6 @@ class Serverpod {
   }
 
   void _innerInitializeServerpod() {
-    _instance = this;
     _internalSerializationManager = internal.Protocol();
     Features(config);
 
@@ -686,7 +696,7 @@ class Serverpod {
     void onZoneError(Object error, StackTrace stackTrace) {
       if (error is ExitException) {
         if (error.message != '') {
-          stderr.writeln(error.message);
+          log.error(error.message);
         }
         exit(error.exitCode);
       }
@@ -745,7 +755,7 @@ class Serverpod {
 
       await _loadRuntimeSettings();
     } else if (config.applyMigrations || config.applyRepairMigration) {
-      stderr.writeln(
+      log.warning(
         'Migrations are disabled in this project, skipping applying migration(s).',
       );
       _exitCode = 1;
@@ -882,7 +892,7 @@ class Serverpod {
         var appliedRepairMigration = await migrationManager
             .applyRepairMigration(internalSession);
         if (appliedRepairMigration == null) {
-          stderr.writeln('Failed to apply database repair migration.');
+          log.error('Failed to apply database repair migration.');
         } else {
           _writeLifecycleMessage(
             'Database repair migration "$appliedRepairMigration" applied.',
@@ -1257,9 +1267,7 @@ class Serverpod {
   /// Logs a message to the console if the logging command line argument is set
   /// to verbose.
   void logVerbose(String message) {
-    if (config.loggingMode == ServerpodLoggingMode.verbose) {
-      stdout.writeln(message);
-    }
+    log.debug(message);
   }
 
   /// Logs a message to the console if the logging command line argument is set
@@ -1275,20 +1283,8 @@ class Serverpod {
     StackTrace stackTrace, {
     String? message,
   }) {
-    var now = DateTime.now().toUtc();
-    if (message != null) {
-      stderr.writeln('$now ERROR: $message');
-    }
-    stderr.writeln('$now ERROR: $e');
-    stderr.writeln('$stackTrace');
-
     var errorMessage = message != null ? '$message: $e' : '$e';
-    developer.postEvent('ext.serverpod.log', {
-      'type': 'log',
-      'level': 'error',
-      'message': errorMessage,
-      'timestamp': now.toIso8601String(),
-    });
+    log.error(errorMessage, error: e, stackTrace: stackTrace);
 
     internalSubmitEvent(
       ExceptionEvent(e, stackTrace, message: message),
@@ -1339,10 +1335,9 @@ class Serverpod {
           _reportException(e, stackTrace, message: message);
         }
 
-        stderr.writeln('Retrying to connect to the database in 10 seconds.');
+        log.warning('Retrying to connect to the database in 10 seconds.');
         if (!printedDatabaseConnectionError) {
-          stderr.writeln('Database configuration:');
-          stderr.writeln(config.database.toString());
+          log.warning('Database configuration: ${config.database}');
           printedDatabaseConnectionError = true;
         }
 
@@ -1400,7 +1395,7 @@ Future<void>? _shutdownTestAuditor() {
     return null;
   }
   return Future(() {
-    stderr.writeln('serverpod shutdown test auditor enabled');
+    Serverpod.instance.log.warning('serverpod shutdown test auditor enabled');
     if (testThrowerDelaySeconds == 0) {
       throw Exception('serverpod shutdown test auditor throwing');
     } else {

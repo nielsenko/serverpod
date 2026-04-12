@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod/src/server/log_manager/logger.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 import 'package:serverpod/src/server/session.dart';
 import 'package:serverpod/src/server/diagnostic_events/diagnostic_events.dart';
@@ -236,12 +236,11 @@ abstract class EndpointWebsocketRequestHandler {
     Request? request,
     StreamingSession? session,
   }) {
-    var now = DateTime.now().toUtc();
     if (message != null) {
-      stderr.writeln('$now ERROR: $message');
+      server.serverpod.log.error(message, error: e, stackTrace: stackTrace);
+    } else {
+      server.serverpod.log.error('$e', error: e, stackTrace: stackTrace);
     }
-    stderr.writeln('$now ERROR: $e');
-    stderr.writeln('$stackTrace');
 
     var context = session != null
         ? contextFromSession(session, request: request)

@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:redis/redis.dart';
+import 'package:serverpod/src/server/log_manager/logger.dart';
+import 'package:serverpod/src/server/serverpod.dart';
 
 /// Callback when messages are received on a specific channel from Redis.
 typedef RedisSubscriptionCallback =
@@ -83,11 +84,11 @@ class RedisController {
       }
       return command;
     } catch (e, stackTrace) {
-      stderr.writeln(
-        '${DateTime.now().toUtc()} Internal server error. Failed to connect to Redis.',
+      Serverpod.instance.log.error(
+        'Internal server error. Failed to connect to Redis.',
+        error: e,
+        stackTrace: stackTrace,
       );
-      stderr.writeln('$e');
-      stderr.writeln('$stackTrace');
       return null;
     }
   }
@@ -137,13 +138,11 @@ class RedisController {
       (e, stackTrace) {
         _invalidatePubSub();
 
-        stderr.writeln(
-          '${DateTime.now().toUtc()} Internal server error. Failed to connect to Redis when creating PubSub.',
+        Serverpod.instance.log.error(
+          'Internal server error. Failed to connect to Redis when creating PubSub.',
+          error: e,
+          stackTrace: stackTrace,
         );
-        stderr.writeln('$e');
-        stderr.writeln('$stackTrace');
-        stderr.writeln('Local stacktrace:');
-        stderr.writeln('${StackTrace.current}');
       },
     );
 

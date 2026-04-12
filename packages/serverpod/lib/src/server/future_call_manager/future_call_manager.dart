@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:clock/clock.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/protocol.dart';
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod/src/server/log_manager/logger.dart';
 
 import 'future_call_diagnostics_service.dart';
 import 'future_call_scanner.dart';
@@ -137,11 +137,13 @@ class FutureCallManager {
   Future<void> runScheduledFutureCalls() async {
     await _checkBrokenFutureCalls();
     if (_futureCalls.isEmpty) {
-      stdout.writeln('No future calls registered. Skipping processing.');
+      Serverpod.instance.log.info(
+        'No future calls registered. Skipping processing.',
+      );
       return;
     }
 
-    stdout.writeln('Processing future calls.');
+    Serverpod.instance.log.info('Processing future calls.');
 
     await _scanner.scanFutureCallEntries();
 
