@@ -43,6 +43,9 @@ class Serverpod {
   /// The framework logger. Routes messages through the [LogWriter] chain.
   late final log_api.Logger log;
 
+  /// The writer chain shared by both framework and session logging.
+  late final log_types.LogWriter logWriter;
+
   late Session _internalSession;
 
   late Session _internalLoggingSession;
@@ -465,10 +468,8 @@ class Serverpod {
     _instance = this;
 
     // Initialize logger early so _writeLifecycleMessage works immediately.
-    log = log_api.Logger(
-      log_types.MultiLogWriter([TextWriter(), VmServiceWriter()]),
-      logLevel: log_types.LogLevel.info,
-    );
+    logWriter = log_types.MultiLogWriter([TextWriter(), VmServiceWriter()]);
+    log = log_api.Logger(logWriter, logLevel: log_types.LogLevel.info);
 
     _writeLifecycleMessage(
       'SERVERPOD version: $serverpodVersion, dart: ${Platform.version}, time: ${DateTime.now().toUtc()}',

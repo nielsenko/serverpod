@@ -5,11 +5,8 @@ import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod/src/server/features.dart';
-import 'package:serverpod/src/server/log_manager/log_manager.dart';
-import 'package:serverpod/src/server/log_manager/logger.dart';
-import 'package:serverpod/src/server/log_manager/log_settings.dart';
-import 'package:serverpod/src/server/log_manager/log_writers.dart';
-import 'package:serverpod/src/server/log_manager/vm_service_log_writer.dart';
+import 'package:serverpod_log/serverpod_log.dart' hide LogLevel;
+import 'package:serverpod/src/server/log_manager/session_log_manager.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 
 import '../cache/caches.dart';
@@ -159,60 +156,19 @@ abstract class Session implements DatabaseSession {
     }
 
     if (enableLogging) {
-      var logWriter = _createLogWriter(
-        this,
-        server.serverpod.logSettingsManager,
-      );
       _logManager = SessionLogManager(
-        logWriter,
         session: this,
+        writer: server.serverpod.logWriter,
         settingsForSession: (Session session) => server
             .serverpod
             .logSettingsManager
             .getLogSettingsForSession(session),
-        disableLoggingSlowSessions: _isLongLived(this),
+        disableSlowSessionLogging: _isLongLived(this),
         serverId: server.serverId,
       );
     } else {
       _logManager = null;
     }
-  }
-
-  LogWriter _createLogWriter(Session session, LogSettingsManager settings) {
-    var logSettings = settings.getLogSettingsForSession(session);
-
-    var logWriters = <LogWriter>[];
-
-    var sessionLogs = session.serverpod.config.sessionLogs;
-    if (sessionLogs.persistentEnabled) {
-      if (_db?.dialect != DatabaseDialect.sqlite) {
-        logWriters.add(
-          DatabaseLogWriter(
-            logWriterSession: session.serverpod.internalSession,
-          ),
-        );
-      }
-    }
-
-    if (sessionLogs.consoleEnabled) {
-      var logFormat = sessionLogs.consoleLogFormat;
-      var consoleLogger = switch (logFormat) {
-        ConsoleLogFormat.json => JsonStdOutLogWriter(session),
-        ConsoleLogFormat.text => TextStdOutLogWriter(session),
-      };
-      logWriters.add(consoleLogger);
-    }
-
-    logWriters.add(VmServiceLogWriter(session));
-
-    if ((_isLongLived(session)) &&
-        logSettings.logStreamingSessionsContinuously) {
-      return MultipleLogWriter(logWriters);
-    }
-
-    return MultipleLogWriter(
-      logWriters.map((writer) => CachedLogWriter(writer)).toList(),
-    );
   }
 
   /// Returns the duration this session has been open.
