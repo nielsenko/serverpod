@@ -1,9 +1,11 @@
 import 'dart:io' show stderr;
 
-/// Writes a message to stderr.
+/// Callback for writing error/warning messages.
 ///
-/// Used for diagnostic output that should not be mixed with normal program
-/// output.
-void writeError(String message) {
+/// Defaults to writing to stderr. Can be overridden to route messages
+/// through a structured logging system (e.g., serverpod's Logger).
+void Function(String message) writeError = _defaultWriteError;
+
+void _defaultWriteError(String message) {
   stderr.writeln(message);
 }
