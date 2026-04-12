@@ -1,0 +1,11 @@
+name: serverpod_log
+version: 0.0.1
+description: Structured logging with scoped operations for Dart.
+repository: https://github.com/serverpod/serverpod
+homepage: https://serverpod.dev
+
+environment:
+  sdk: '^3.8.0'
+
+dev_dependencies:
+  test: ^1.25.5

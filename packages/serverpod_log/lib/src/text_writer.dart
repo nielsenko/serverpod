@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import '../log_types.dart';
+import 'log_types.dart';
 
 /// A [LogWriter] that writes formatted text to stdout/stderr.
 class TextWriter extends LogWriter {

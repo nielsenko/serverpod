@@ -3,10 +3,10 @@ import 'dart:io';
 
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_database/serverpod_database.dart';
-import 'package:serverpod/src/server/log_manager/log_types.dart' as log_types;
-import 'package:serverpod/src/server/log_manager/logger.dart' as log_api;
+import 'package:serverpod_log/serverpod_log.dart' as log_types;
+import 'package:serverpod_log/serverpod_log.dart' as log_api;
+import 'package:serverpod_log/serverpod_log.dart' show TextWriter;
 import 'package:serverpod/src/server/log_manager/writers/vm_service_writer.dart';
-import 'package:serverpod/src/server/log_manager/writers/text_writer.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
 import 'package:serverpod/src/database/server_migration_manager.dart';
