@@ -885,6 +885,7 @@ class Serverpod {
       var migrationManager = ServerMigrationManager(
         Directory.current,
         runMode: runMode,
+        log: log,
       );
 
       if (applyRepairMigration) {
@@ -921,6 +922,7 @@ class Serverpod {
       _internalLogVerbose('Verifying database integrity.');
       verified = await ServerMigrationManager.verifyDatabaseIntegrity(
         internalSession,
+        log: log,
       );
     } catch (e, stackTrace) {
       verified = false;

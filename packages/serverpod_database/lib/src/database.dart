@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:serverpod_log/serverpod_log.dart';
+
 import '../serverpod_database.dart';
 import 'interface/database_connection.dart';
 
@@ -45,10 +47,13 @@ class Database {
   SerializationManagerServer get serializationManager =>
       _databaseConnection.poolManager.serializationManager;
 
+  /// The logger for database operations.
+  late Logger log = Logger(TextWriter());
+
   /// The analyzer for this database.
   late final analyzer = DatabaseProvider.forDialect(
     dialect,
-  ).createAnalyzer(this);
+  ).createAnalyzer(this, log: log);
 
   /// Returns a list of [TableRow]s matching the given query parameters.
   ///

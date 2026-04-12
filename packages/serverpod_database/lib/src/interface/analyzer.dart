@@ -1,7 +1,7 @@
+import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../../serverpod_database.dart' hide Protocol;
-import '../util/stderr_util.dart';
 
 /// The current schema version of the database definition.
 const currentSchemaVersion = 2;
@@ -11,8 +11,10 @@ abstract class DatabaseAnalyzer {
   /// The [Database] to analyze.
   final Database database;
 
+  final Logger _log;
+
   /// Creates a new [DatabaseAnalyzer] for the given [database].
-  DatabaseAnalyzer({required this.database});
+  DatabaseAnalyzer({required this.database, required Logger log}) : _log = log;
 
   /// Analyze the structure of the [database].
   Future<DatabaseDefinition> analyze() async {
@@ -69,7 +71,7 @@ abstract class DatabaseAnalyzer {
       ];
     } catch (e) {
       // Ignore if the table does not exist.
-      writeError('Failed to get installed migrations: $e');
+      _log.error('Failed to get installed migrations: $e');
       return [];
     }
   }

@@ -1,3 +1,4 @@
+import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../../../serverpod_database.dart';
@@ -43,7 +44,10 @@ class SqliteDatabaseProvider implements DatabaseProvider {
   }
 
   @override
-  SqliteDatabaseAnalyzer createAnalyzer(Database database) {
-    return SqliteDatabaseAnalyzer(database: database);
+  SqliteDatabaseAnalyzer createAnalyzer(
+    Database database, {
+    required Logger log,
+  }) {
+    return SqliteDatabaseAnalyzer(database: database, log: log);
   }
 }

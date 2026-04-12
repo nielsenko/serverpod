@@ -6,7 +6,7 @@ import 'sqlite_default_value.dart';
 /// Analyzes the structure of SQLite [Database]s.
 class SqliteDatabaseAnalyzer extends DatabaseAnalyzer {
   /// Creates a new [SqliteDatabaseAnalyzer] for the given [database].
-  SqliteDatabaseAnalyzer({required super.database});
+  SqliteDatabaseAnalyzer({required super.database, required super.log});
 
   /// SQLite uses a single default schema.
   static const String _defaultSchema = 'main';

@@ -2,15 +2,20 @@ import 'dart:io';
 
 import 'package:serverpod/src/generated/database_migration_version.dart';
 import 'package:serverpod_database/serverpod_database.dart';
+import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 /// The server migration manager handles migrations of the database.
 class ServerMigrationManager extends MigrationManager {
   /// Creates a new server migration manager.
-  ServerMigrationManager(Directory projectDirectory, {super.runMode})
-    : super(
-        FileSystemMigrationArtifactStore(projectDirectory: projectDirectory),
-      );
+  ServerMigrationManager(
+    Directory projectDirectory, {
+    super.runMode,
+    required Logger log,
+  }) : super(
+         FileSystemMigrationArtifactStore(projectDirectory: projectDirectory),
+         log: log,
+       );
 
   @override
   Future<List<DatabaseMigrationVersion>> loadInstalledVersions(
@@ -39,7 +44,10 @@ class ServerMigrationManager extends MigrationManager {
   /// Verifies the integrity of the database.
   ///
   /// Returns true if the database is intact, false otherwise.
-  static Future<bool> verifyDatabaseIntegrity(DatabaseSession session) async {
-    return await MigrationManager.verifyDatabaseIntegrity(session);
+  static Future<bool> verifyDatabaseIntegrity(
+    DatabaseSession session, {
+    required Logger log,
+  }) async {
+    return await MigrationManager.verifyDatabaseIntegrity(session, log: log);
   }
 }

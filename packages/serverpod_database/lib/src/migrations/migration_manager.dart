@@ -1,16 +1,14 @@
 import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
+import 'package:serverpod_log/serverpod_log.dart';
 
 import '../../serverpod_database.dart';
 import '../migrations/table_comparison_warning.dart';
-import '../util/stderr_util.dart';
-
-/// A function that writes a warning message.
-typedef MigrationWarningWriter = void Function(String message);
 
 /// The migration manager handles migrations of the database.
 abstract class MigrationManager {
   final MigrationArtifactStore _artifactStore;
+  final Logger _log;
 
   /// The run mode of the server.
   ///
@@ -33,7 +31,8 @@ abstract class MigrationManager {
   final List<String> availableVersions = [];
 
   /// Creates a new migration manager.
-  MigrationManager(this._artifactStore, {this.runMode});
+  MigrationManager(this._artifactStore, {this.runMode, required Logger log})
+    : _log = log;
 
   /// Loads the installed versions of the migrations from the database.
   ///
@@ -115,8 +114,8 @@ abstract class MigrationManager {
 
       var definitionModuleName = await _loadLatestDefinitionModuleName();
       if (definitionModuleName != null && definitionModuleName != moduleName) {
-        writeError(
-          'WARNING: The module name in the migration definition '
+        _log.warning(
+          'The module name in the migration definition '
           '("$definitionModuleName") does not match the module name of the '
           'serialization manager ("$moduleName"). This may indicate that the '
           'wrong Protocol class is being used in "server.dart". Make sure you '
@@ -245,8 +244,7 @@ abstract class MigrationManager {
         );
         migrationsApplied.add(code.version);
       } catch (e) {
-        writeError('Failed to apply migration ${code.version}.');
-        writeError('$e');
+        _log.error('Failed to apply migration ${code.version}.', error: e);
         rethrow;
       }
     }
@@ -282,13 +280,10 @@ abstract class MigrationManager {
     }
 
     if (warnings.isNotEmpty) {
-      writeError(
-        'WARNING: The following module migration registries could not be '
-        'loaded:',
+      _log.warning(
+        'The following module migration registries could not be loaded:\n'
+        '${warnings.map((w) => ' - $w').join('\n')}',
       );
-      for (var warning in warnings) {
-        writeError(' - $warning');
-      }
     }
   }
 
@@ -303,7 +298,10 @@ abstract class MigrationManager {
 
   /// Returns true if the database structure is up to date. If not, it will
   /// print a warning using [writeWarning].
-  static Future<bool> verifyDatabaseIntegrity(DatabaseSession session) async {
+  static Future<bool> verifyDatabaseIntegrity(
+    DatabaseSession session, {
+    required Logger log,
+  }) async {
     var warnings = <String>[];
 
     var liveDatabase = await session.db.analyzer.analyze();
@@ -326,11 +324,9 @@ abstract class MigrationManager {
       }
     }
     if (warnings.isNotEmpty) {
-      writeError('WARNING: The database does not match the target database:');
-      for (var warning in warnings) {
-        writeError(' - $warning');
-      }
-      writeError(
+      log.warning(
+        'The database does not match the target database:\n'
+        '${warnings.map((w) => ' - $w').join('\n')}\n'
         'Hint: Did you forget to run `serverpod generate`, apply the migrations '
         '(--apply-migrations), or run a repair migration (--apply-repair-migration)?',
       );
