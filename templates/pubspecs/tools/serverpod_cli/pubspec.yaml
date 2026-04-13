@@ -34,6 +34,7 @@ dependencies:
   pubspec_parse: ^1.4.0
   recase: ^4.1.0
   serverpod_database: SERVERPOD_VERSION
+  serverpod_log: SERVERPOD_VERSION
   serverpod_serialization: SERVERPOD_VERSION
   serverpod_service_client: SERVERPOD_VERSION
   serverpod_shared: SERVERPOD_VERSION
@@ -61,6 +62,8 @@ dependency_overrides:
     path: ../../packages/serverpod_database
   serverpod_lints:
     path: ../../packages/serverpod_lints
+  serverpod_log: 
+    path: ../../packages/serverpod_log
   serverpod_serialization:
     path: ../../packages/serverpod_serialization
   serverpod_service_client:

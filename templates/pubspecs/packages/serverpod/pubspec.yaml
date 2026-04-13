@@ -32,6 +32,7 @@ dependencies:
   relic: ^1.2.0
   retry: ^3.1.1
   serverpod_database: SERVERPOD_VERSION
+  serverpod_log: SERVERPOD_VERSION
   serverpod_serialization: SERVERPOD_VERSION
   serverpod_shared: SERVERPOD_VERSION
   synchronized: ^3.1.0
@@ -51,6 +52,8 @@ dependency_overrides:
     path: ../serverpod_database
   serverpod_lints:
     path: ../serverpod_lints
+  serverpod_log: 
+    path: ../serverpod_log
   serverpod_serialization:
     path: ../serverpod_serialization
   serverpod_shared:
