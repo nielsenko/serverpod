@@ -12,10 +12,12 @@ extension DatabaseConstructor on Database {
   static Database create({
     required DatabaseSession session,
     required DatabasePoolManager poolManager,
+    required Log log,
   }) {
     return Database._(
       session: session,
       poolManager: poolManager,
+      log: log,
     );
   }
 }
@@ -31,6 +33,7 @@ class Database {
   Database._({
     required DatabaseSession session,
     required DatabasePoolManager poolManager,
+    required this.log,
   }) : _session = session,
        _databaseConnection = DatabaseProvider.forDialect(
          poolManager.dialect,
@@ -48,7 +51,7 @@ class Database {
       _databaseConnection.poolManager.serializationManager;
 
   /// The logger for database operations.
-  late Log log = Log(TextLogWriter());
+  final Log log;
 
   /// The analyzer for this database.
   late final analyzer = DatabaseProvider.forDialect(

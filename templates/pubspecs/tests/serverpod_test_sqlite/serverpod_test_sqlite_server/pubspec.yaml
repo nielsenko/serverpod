@@ -17,6 +17,7 @@ dependencies:
 dev_dependencies:
   serverpod_cli: SERVERPOD_VERSION
   serverpod_lints: SERVERPOD_VERSION
+  serverpod_log: SERVERPOD_VERSION
   serverpod_test: SERVERPOD_VERSION
   serverpod_test_client:
     path: ../../serverpod_test_client
