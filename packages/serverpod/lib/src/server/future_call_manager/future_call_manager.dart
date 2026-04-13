@@ -485,7 +485,9 @@ class FutureCallManager {
         }
       }
     }
-    _logSession.log(buffer.toString(), level: LogLevel.warning);
+    if (buffer.isNotEmpty) {
+      _logSession.log(buffer.toString(), level: LogLevel.warning);
+    }
 
     final allCalls = unregisteredCalls + brokenCalls;
 
