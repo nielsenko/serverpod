@@ -1,71 +1,51 @@
-import 'dart:io';
-
 import 'package:cli_tools/cli_tools.dart' as cli;
-// ignore: implementation_imports
-import 'package:cli_tools/src/logger/helpers/progress.dart';
 import 'package:serverpod_log/serverpod_log.dart';
 
 /// Metadata key used to pass [cli.LogType] through [LogEntry.metadata].
 const logTypeKey = 'serverpod:logType';
 
-/// A [LogWriter] that delegates to a cli_tools [cli.StdOutLogger] for
-/// terminal formatting, including [cli.LogType]-aware output (bullets,
-/// headers, boxes, etc.) and braille progress spinners.
+/// A [SpinnerLogWriter] that delegates log formatting to a cli_tools
+/// [cli.StdOutLogger] for [cli.LogType]-aware output (bullets, headers,
+/// boxes, etc.).
+///
+/// Spinner animation is handled by the [SpinnerLogWriter] base class.
 ///
 /// [cli.LogType] is read from [LogEntry.metadata] using [logTypeKey].
-class StdOutLogWriter extends LogWriter {
+class StdOutLogWriter extends SpinnerLogWriter {
   final cli.StdOutLogger _logger;
-  Progress? _activeProgress;
 
   StdOutLogWriter({
-    cli.LogLevel logLevel = cli.LogLevel.info,
     Map<String, String>? replacements,
-  }) : _logger = cli.StdOutLogger(logLevel, replacements: replacements);
+  }) : _logger = cli.StdOutLogger(
+         // Accept all levels - filtering is done by Log, not the writer.
+         cli.LogLevel.debug,
+         replacements: replacements,
+       );
 
   @override
-  Future<void> log(LogEntry entry) async {
+  void writeLogLine(LogEntry entry) {
     final cliLevel = _mapLevel(entry.level);
     final type =
         entry.metadata?[logTypeKey] as cli.LogType? ?? cli.TextLogType.normal;
-
-    _stopProgress();
     _logger.log(entry.message, cliLevel, type: type);
-    _redrawProgress();
   }
 
   @override
-  Future<void> openScope(LogScope scope) async {
-    _stopProgress();
-
-    final progress = Progress(scope.label, stdout);
-    _logger.trackedAnimationInProgress = progress;
-    _activeProgress = progress;
+  String formatSpinner(String frame, ActiveScope active) {
+    final elapsed = cli.AnsiStyle.darkGray.wrap(
+      '(${formatElapsed(active.stopwatch.elapsed)})',
+    );
+    return '${cli.AnsiStyle.lightGreen.wrap(frame)} '
+        '${active.scope.label}... $elapsed';
   }
 
   @override
-  Future<void> closeScope(
-    LogScope scope, {
-    required bool success,
-    required Duration duration,
-    Object? error,
-    StackTrace? stackTrace,
-  }) async {
-    _logger.trackedAnimationInProgress = null;
-    final p = _activeProgress;
-    _activeProgress = null;
-    success ? p?.complete() : p?.fail();
-  }
-
-  void _stopProgress() {
-    if (_activeProgress != null) {
-      _activeProgress!.stopAnimation();
-      stdout.write('\n');
-      _logger.trackedAnimationInProgress = null;
-    }
-  }
-
-  void _redrawProgress() {
-    // The timer on Progress handles redrawing automatically.
+  String formatScopeComplete(LogScope scope, bool success, Duration duration) {
+    final elapsed = cli.AnsiStyle.darkGray.wrap('(${formatElapsed(duration)})');
+    final icon = success
+        ? cli.AnsiStyle.lightGreen.wrap('\u2713')
+        : cli.AnsiStyle.red.wrap('\u2717');
+    return '$icon ${scope.label} $elapsed';
   }
 
   static cli.LogLevel _mapLevel(LogLevel level) => switch (level) {
