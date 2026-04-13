@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
@@ -34,8 +33,10 @@ Future<LegacySession?> resolveLegacySession(
 
     return legacySession;
   } catch (exception, stackTrace) {
-    stderr.writeln('Failed authentication: $exception');
-    stderr.writeln('$stackTrace');
+    session.serverpod.log.error(
+      'Failed authentication: $exception',
+      stackTrace: stackTrace,
+    );
     return null;
   }
 }

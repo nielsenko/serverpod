@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_server/serverpod_auth_server.dart';
 import 'package:serverpod_auth_server/src/business/authentication_util.dart';
@@ -47,8 +45,10 @@ Future<AuthenticationInfo?> authenticationHandler(
       authId: keyIdStr,
     );
   } catch (exception, stackTrace) {
-    stderr.writeln('Failed authentication: $exception');
-    stderr.writeln('$stackTrace');
+    session.serverpod.log.error(
+      'Failed authentication: $exception',
+      stackTrace: stackTrace,
+    );
     return null;
   }
 }

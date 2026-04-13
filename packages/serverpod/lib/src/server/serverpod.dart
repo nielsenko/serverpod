@@ -678,7 +678,7 @@ class Serverpod {
       if (_isValidSecret(config.serviceSecret)) {
         _insightsServer = _configureInsightsServer();
       } else {
-        stderr.write(
+        log.warning(
           'Invalid serviceSecret in password file, Insights server disabled.',
         );
       }
