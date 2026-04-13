@@ -4,7 +4,7 @@ import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod/src/database/server_migration_manager.dart';
 import 'package:serverpod/src/hot_reload/hot_reload.dart';
 import 'package:serverpod/src/server/health_check.dart';
-import 'package:serverpod/src/server/log_manager/logger.dart';
+import 'package:serverpod/src/server/log_manager/log.dart';
 import 'package:serverpod/src/server/serverpod.dart' as svp;
 import 'package:serverpod/src/util/path_util.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';

@@ -11,10 +11,10 @@ abstract class DatabaseAnalyzer {
   /// The [Database] to analyze.
   final Database database;
 
-  final Logger _log;
+  final Log _log;
 
   /// Creates a new [DatabaseAnalyzer] for the given [database].
-  DatabaseAnalyzer({required this.database, required Logger log}) : _log = log;
+  DatabaseAnalyzer({required this.database, required Log log}) : _log = log;
 
   /// Analyze the structure of the [database].
   Future<DatabaseDefinition> analyze() async {

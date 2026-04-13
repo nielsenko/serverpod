@@ -4,8 +4,7 @@ import 'dart:io';
 import 'package:cli_tools/cli_tools.dart';
 // ignore: implementation_imports
 import 'package:cli_tools/src/logger/helpers/progress.dart';
-
-import 'isolated_object.dart';
+import 'package:serverpod_log/serverpod_log.dart' show IsolatedObject;
 
 /// A [Logger] whose output operations run in a dedicated isolate.
 ///

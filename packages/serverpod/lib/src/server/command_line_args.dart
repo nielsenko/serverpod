@@ -1,8 +1,6 @@
 import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:serverpod/src/server/log_manager/log.dart';
-import 'package:serverpod/src/server/serverpod.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 import 'run_mode.dart';

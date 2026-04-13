@@ -11,7 +11,7 @@ import '../log_types.dart';
 ///
 /// This writer is only effective when the VM service is enabled (dev
 /// mode). In production, [developer.postEvent] is a no-op.
-class VmServiceWriter extends LogWriter {
+class VmServiceLogWriter extends LogWriter {
   @override
   Future<void> log(LogEntry entry) async {
     _postEvent({

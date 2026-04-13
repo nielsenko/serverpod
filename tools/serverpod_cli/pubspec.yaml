@@ -63,7 +63,7 @@ dependency_overrides:
     path: ../../packages/serverpod_database
   serverpod_lints:
     path: ../../packages/serverpod_lints
-  serverpod_log: 
+  serverpod_log:
     path: ../../packages/serverpod_log
   serverpod_serialization:
     path: ../../packages/serverpod_serialization

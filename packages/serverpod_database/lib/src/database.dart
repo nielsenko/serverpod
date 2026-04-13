@@ -48,7 +48,7 @@ class Database {
       _databaseConnection.poolManager.serializationManager;
 
   /// The logger for database operations.
-  late Logger log = Logger(TextWriter());
+  late Log log = Log(TextLogWriter());
 
   /// The analyzer for this database.
   late final analyzer = DatabaseProvider.forDialect(

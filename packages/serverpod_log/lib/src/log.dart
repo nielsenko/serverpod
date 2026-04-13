@@ -35,12 +35,12 @@ Future<T> runInScope<T>({
 ///   log.info('Step 1');  // automatically scoped to Migration
 /// });
 /// ```
-class Logger {
+class Log {
   final LogWriter _writer;
 
   LogLevel logLevel;
 
-  Logger(this._writer, {this.logLevel = LogLevel.info});
+  Log(this._writer, {this.logLevel = LogLevel.info});
 
   /// The current scope from the Zone. Falls back to a synthetic root
   /// if no scope has been set.
@@ -58,7 +58,7 @@ class Logger {
 }
 
 /// Convenience methods for common log levels.
-extension LoggerConvenience on Logger {
+extension LogConvenience on Log {
   void debug(String message, {Map<String, Object?>? metadata}) => this(
     LogLevel.debug,
     () => LogEntry(
@@ -114,7 +114,7 @@ extension LoggerConvenience on Logger {
 }
 
 /// Scope management: progress operations and manual scope control.
-extension LoggerScoping on Logger {
+extension LogScoping on Log {
   /// Runs [runner] inside a new scope. The scope is automatically opened
   /// before the runner and closed after it completes (or fails).
   ///
@@ -159,9 +159,9 @@ extension LoggerScoping on Logger {
   /// Opens a child scope manually. The caller is responsible for closing
   /// it. Prefer [progress] when possible.
   ///
-  /// Returns a [ScopedLogger] that logs to the child scope and must be
+  /// Returns a [ScopedLog] that logs to the child scope and must be
   /// closed when done.
-  ScopedLogger openScope(
+  ScopedLog openScope(
     String label, {
     Map<String, Object?>? metadata,
   }) {
@@ -171,17 +171,17 @@ extension LoggerScoping on Logger {
       metadata: metadata,
     );
     _writer.openScope(scope);
-    return ScopedLogger._(_writer, scope, logLevel);
+    return ScopedLog._(_writer, scope, logLevel);
   }
 }
 
-/// A logger bound to a specific scope. Created by [LoggerScoping.openScope].
+/// A logger bound to a specific scope. Created by [LogScoping.openScope].
 /// Must be [close]d when done.
-class ScopedLogger extends Logger {
+class ScopedLog extends Log {
   final LogScope _scope;
   final Stopwatch _stopwatch;
 
-  ScopedLogger._(LogWriter writer, this._scope, LogLevel level)
+  ScopedLog._(LogWriter writer, this._scope, LogLevel level)
     : _stopwatch = Stopwatch()..start(),
       super(writer, logLevel: level);
 

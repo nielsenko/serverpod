@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod/src/server/log_manager/logger.dart';
+import 'package:serverpod/src/server/log_manager/log.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 import 'package:serverpod/src/server/session.dart';
 import 'package:serverpod/src/server/diagnostic_events/diagnostic_events.dart';

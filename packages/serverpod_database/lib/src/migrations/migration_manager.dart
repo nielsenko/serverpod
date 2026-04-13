@@ -8,7 +8,7 @@ import '../migrations/table_comparison_warning.dart';
 /// The migration manager handles migrations of the database.
 abstract class MigrationManager {
   final MigrationArtifactStore _artifactStore;
-  final Logger _log;
+  final Log _log;
 
   /// The run mode of the server.
   ///
@@ -31,7 +31,7 @@ abstract class MigrationManager {
   final List<String> availableVersions = [];
 
   /// Creates a new migration manager.
-  MigrationManager(this._artifactStore, {this.runMode, required Logger log})
+  MigrationManager(this._artifactStore, {this.runMode, required Log log})
     : _log = log;
 
   /// Loads the installed versions of the migrations from the database.
@@ -300,7 +300,7 @@ abstract class MigrationManager {
   /// print a warning using [writeWarning].
   static Future<bool> verifyDatabaseIntegrity(
     DatabaseSession session, {
-    required Logger log,
+    required Log log,
   }) async {
     var warnings = <String>[];
 

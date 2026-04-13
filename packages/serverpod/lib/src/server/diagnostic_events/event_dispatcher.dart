@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:serverpod/src/server/log_manager/logger.dart';
+import 'package:serverpod/src/server/log_manager/log.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 
 import 'event_handler.dart';

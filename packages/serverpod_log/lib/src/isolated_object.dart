@@ -1,4 +1,4 @@
-// TODO: verbatim copy from relic (almost). Should move to separate package.
+// Vendored from relic (via serverpod_cli). Should move to a shared package.
 import 'dart:async';
 import 'dart:isolate';
 

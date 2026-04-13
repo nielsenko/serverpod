@@ -1,9 +1,9 @@
 export 'package:serverpod_log/serverpod_log.dart'
     show
-        Logger,
-        LoggerConvenience,
-        LoggerScoping,
-        ScopedLogger,
+        Log,
+        LogConvenience,
+        LogScoping,
+        ScopedLog,
         logScopeKey,
         runWithRootScope,
         runInScope;
