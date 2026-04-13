@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:serverpod_cli/src/commands/start/tui/app.dart';
 import 'package:serverpod_cli/src/commands/start/tui/event_handler.dart';
 import 'package:serverpod_cli/src/commands/start/tui/state.dart';
+import 'package:serverpod_log/serverpod_log.dart';
 import 'package:test/test.dart';
 import 'package:vm_service/vm_service.dart';
 
@@ -39,9 +40,9 @@ void main() {
 
     test('when dispatched then adds to logHistory', () {
       expect(state.logHistory, hasLength(1));
-      final entry = state.logHistory.first as TuiLogEntry;
+      final entry = state.logHistory.first as LogEntry;
       expect(entry.message, 'Server started');
-      expect(entry.level, TuiLogLevel.info);
+      expect(entry.level, LogLevel.info);
     });
   });
 
@@ -58,8 +59,8 @@ void main() {
     });
 
     test('when dispatched then parses level correctly', () {
-      final entry = state.logHistory.first as TuiLogEntry;
-      expect(entry.level, TuiLogLevel.warning);
+      final entry = state.logHistory.first as LogEntry;
+      expect(entry.level, LogLevel.warning);
     });
   });
 
@@ -125,7 +126,7 @@ void main() {
       final op = state.activeOperations['sess_3']!;
       expect(op.entries, hasLength(1));
       expect(op.entries.first.message, 'Fetching records');
-      expect(op.entries.first.level, TuiLogLevel.info);
+      expect(op.entries.first.level, LogLevel.info);
     });
 
     test('when session_query arrives then adds query sub-entry', () {
@@ -211,33 +212,33 @@ void main() {
     });
   });
 
-  group('Given parseTuiLogLevel', () {
+  group('Given parseLogLevel', () {
     test('when "debug" then returns debug', () {
-      expect(parseTuiLogLevel('debug'), TuiLogLevel.debug);
+      expect(parseLogLevel('debug'), LogLevel.debug);
     });
 
     test('when "info" then returns info', () {
-      expect(parseTuiLogLevel('info'), TuiLogLevel.info);
+      expect(parseLogLevel('info'), LogLevel.info);
     });
 
     test('when "warning" then returns warning', () {
-      expect(parseTuiLogLevel('warning'), TuiLogLevel.warning);
+      expect(parseLogLevel('warning'), LogLevel.warning);
     });
 
     test('when "warn" then returns warning', () {
-      expect(parseTuiLogLevel('warn'), TuiLogLevel.warning);
+      expect(parseLogLevel('warn'), LogLevel.warning);
     });
 
     test('when "error" then returns error', () {
-      expect(parseTuiLogLevel('error'), TuiLogLevel.error);
+      expect(parseLogLevel('error'), LogLevel.error);
     });
 
     test('when "fatal" then returns fatal', () {
-      expect(parseTuiLogLevel('fatal'), TuiLogLevel.fatal);
+      expect(parseLogLevel('fatal'), LogLevel.fatal);
     });
 
     test('when unknown then defaults to info', () {
-      expect(parseTuiLogLevel('unknown'), TuiLogLevel.info);
+      expect(parseLogLevel('unknown'), LogLevel.info);
     });
   });
 

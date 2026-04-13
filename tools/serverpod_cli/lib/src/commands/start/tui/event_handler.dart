@@ -1,3 +1,4 @@
+import 'package:serverpod_log/serverpod_log.dart';
 import 'package:vm_service/vm_service.dart' show Event;
 
 import '../../../util/serverpod_cli_logger.dart';
@@ -15,12 +16,13 @@ void handleServerLogEvent(AppStateHolder holder, Event event) {
   switch (type) {
     case 'log':
       state.logHistory.add(
-        TuiLogEntry(
-          level: parseTuiLogLevel(data['level'] as String? ?? 'info'),
-          timestamp:
+        LogEntry(
+          level: parseLogLevel(data['level'] as String? ?? 'info'),
+          time:
               DateTime.tryParse(data['timestamp'] as String? ?? '') ??
               DateTime.now(),
           message: data['message'] as String? ?? '',
+          scope: LogScope.root('server'),
         ),
       );
 
@@ -39,7 +41,7 @@ void handleServerLogEvent(AppStateHolder holder, Event event) {
         OperationSubEntry(
           timestamp: DateTime.now(),
           message: data['message'] as String? ?? '',
-          level: parseTuiLogLevel(data['level'] as String? ?? 'info'),
+          level: parseLogLevel(data['level'] as String? ?? 'info'),
         ),
       );
 
@@ -122,13 +124,13 @@ void _completeTrackedAction(
   holder.markDirty();
 }
 
-TuiLogLevel parseTuiLogLevel(String level) {
+LogLevel parseLogLevel(String level) {
   return switch (level) {
-    'debug' => TuiLogLevel.debug,
-    'info' => TuiLogLevel.info,
-    'warning' || 'warn' => TuiLogLevel.warning,
-    'error' => TuiLogLevel.error,
-    'fatal' => TuiLogLevel.fatal,
-    _ => TuiLogLevel.info,
+    'debug' => LogLevel.debug,
+    'info' => LogLevel.info,
+    'warning' || 'warn' => LogLevel.warning,
+    'error' => LogLevel.error,
+    'fatal' => LogLevel.fatal,
+    _ => LogLevel.info,
   };
 }

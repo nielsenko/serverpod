@@ -1,7 +1,8 @@
 import 'dart:async';
 
 import 'package:intl/intl.dart';
-import 'package:nocterm/nocterm.dart';
+import 'package:nocterm/nocterm.dart' hide LogEntry;
+import 'package:serverpod_log/serverpod_log.dart';
 
 import 'format_duration.dart';
 import 'serverpod_theme.dart';
@@ -124,27 +125,37 @@ final _timeFormat = DateFormat('HH:mm:ss.SSS');
 class LogMessageWidget extends StatelessComponent {
   const LogMessageWidget({super.key, required this.entry});
 
-  final TuiLogEntry entry;
+  final LogEntry entry;
+
+  static const _levelLabels = {
+    LogLevel.debug: 'debug',
+    LogLevel.info: 'info ',
+    LogLevel.warning: 'warn ',
+    LogLevel.error: 'error',
+    LogLevel.fatal: 'fatal',
+  };
 
   @override
   Component build(BuildContext context) {
     final st = ServerpodTheme.of(context);
 
     final levelColor = switch (entry.level) {
-      TuiLogLevel.debug => st.debugLevel,
-      TuiLogLevel.info => st.infoLevel,
-      TuiLogLevel.warning => st.warningLevel,
-      TuiLogLevel.error => st.errorLevel,
-      TuiLogLevel.fatal => st.errorLevel,
+      LogLevel.debug => st.debugLevel,
+      LogLevel.info => st.infoLevel,
+      LogLevel.warning => st.warningLevel,
+      LogLevel.error || LogLevel.fatal => st.errorLevel,
     };
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(entry.level.label, style: TextStyle(color: levelColor)),
+        Text(
+          _levelLabels[entry.level] ?? entry.level.name,
+          style: TextStyle(color: levelColor),
+        ),
         const SizedBox(width: 1),
         Text(
-          _timeFormat.format(entry.timestamp.toLocal()),
+          _timeFormat.format(entry.time.toLocal()),
           style: const TextStyle(fontWeight: FontWeight.dim),
         ),
         const SizedBox(width: 1),
@@ -203,9 +214,9 @@ class CompletedOperationWidget extends StatelessComponent {
                 children: [
                   if (entry.level != null)
                     Text(
-                      entry.level!.label,
+                      entry.level!.name,
                       style: TextStyle(
-                        color: entry.level == TuiLogLevel.error
+                        color: entry.level == LogLevel.error
                             ? st.errorLevel
                             : st.debugLevel,
                       ),
@@ -283,9 +294,9 @@ class _TrackedOperationWidgetState extends State<TrackedOperationWidget> {
               children: [
                 if (entry.level != null)
                   Text(
-                    entry.level!.label,
+                    entry.level!.name,
                     style: TextStyle(
-                      color: entry.level == TuiLogLevel.error
+                      color: entry.level == LogLevel.error
                           ? st.errorLevel
                           : st.debugLevel,
                     ),

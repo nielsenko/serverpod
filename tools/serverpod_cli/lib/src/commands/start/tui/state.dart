@@ -1,33 +1,6 @@
+import 'package:serverpod_log/serverpod_log.dart';
+
 import 'bounded_queue_list.dart';
-
-/// Log level for structured log entries displayed in the TUI.
-enum TuiLogLevel {
-  debug('debug', 5),
-  info('info ', 4),
-  warning('warn ', 3),
-  error('error', 2),
-  fatal('fatal', 1);
-
-  const TuiLogLevel(this.label, this.padWidth);
-  final String label;
-  final int padWidth;
-}
-
-/// Base type for entries in the log history.
-sealed class LogEntry {}
-
-/// A single structured log entry.
-final class TuiLogEntry extends LogEntry {
-  TuiLogEntry({
-    required this.timestamp,
-    required this.level,
-    required this.message,
-  });
-
-  final DateTime timestamp;
-  final TuiLogLevel level;
-  final String message;
-}
 
 /// A sub-entry within a tracked operation (session log or query).
 final class OperationSubEntry {
@@ -40,7 +13,7 @@ final class OperationSubEntry {
 
   final DateTime timestamp;
   final String message;
-  final TuiLogLevel? level;
+  final LogLevel? level;
 
   /// Query duration in seconds, if this is a query sub-entry.
   final double? duration;
@@ -73,7 +46,7 @@ final class TrackedOperation {
 }
 
 /// Completed tracked operation, stored in the log history.
-final class CompletedOperation extends LogEntry {
+final class CompletedOperation {
   CompletedOperation({
     required this.label,
     required this.success,
@@ -96,8 +69,9 @@ final class CompletedOperation extends LogEntry {
 final class ServerWatchState {
   ServerWatchState();
 
-  /// Structured log entries for the "Log Messages" tab.
-  final logHistory = BoundedQueueList<LogEntry>(maxLogEntries);
+  /// Log history entries: [LogEntry] (from serverpod_log) or
+  /// [CompletedOperation].
+  final logHistory = BoundedQueueList<Object>(maxLogEntries);
 
   /// Raw stdout/stderr lines for the "Raw Output" tab.
   final rawLines = BoundedQueueList<String>(maxRawLines);

@@ -6,7 +6,7 @@ import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod_log/serverpod_log.dart' as log_types;
 import 'package:serverpod_log/serverpod_log.dart' as log_api;
 import 'package:serverpod_log/serverpod_log.dart'
-    show IsolatedTextLogWriter, TextLogWriter;
+    show IsolatedLogWriter, TextLogWriter;
 import 'package:serverpod/src/server/log_manager/log_writers/vm_service_log_writer.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
@@ -471,7 +471,7 @@ class Serverpod {
     // Initialize logger early so _writeLifecycleMessage works immediately.
     // Writer chain starts with TextLogWriter + VmServiceLogWriter.
     final textWriter = stdout.hasTerminal
-        ? IsolatedTextLogWriter()
+        ? IsolatedLogWriter(TextLogWriter.new)
         : TextLogWriter();
     logWriter = log_types.MultiLogWriter([textWriter, VmServiceLogWriter()]);
     log = log_api.Log(logWriter, logLevel: log_types.LogLevel.info);
