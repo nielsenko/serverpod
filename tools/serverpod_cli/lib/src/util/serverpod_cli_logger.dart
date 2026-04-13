@@ -182,15 +182,14 @@ void initializeLogger() {
   );
 }
 
-/// Initializer for logger singleton.
-/// Uses passed in [logger] to initialize the singleton.
-/// This should only be called once from runtime entry points.
+/// Replaces the logger singleton with the given [logger].
+///
+/// Preserves the current log level if a logger was already set.
 void initializeLoggerWith(cli.Logger logger) {
-  assert(
-    _logger == null,
-    'Only one logger initialization is allowed.',
-  );
-
+  final previous = _logger;
+  if (previous != null) {
+    logger.logLevel = previous.logLevel;
+  }
   _logger = logger;
 }
 

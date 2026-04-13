@@ -26,35 +26,17 @@ void handleServerLogEvent(AppStateHolder holder, Event event) {
         ),
       );
 
-    case 'session_start':
+    case 'scope_start':
       final id = data['id'] as String? ?? '';
       final label = data['label'] as String? ?? '';
-      // Don't track internal sessions as operations.
+      // Don't track internal scopes as operations.
       if (label == 'INTERNAL') break;
       state.activeOperations[id] = TrackedOperation(
         id: id,
         label: label,
       );
 
-    case 'session_log':
-      state.activeOperations[data['sessionId'] as String? ?? '']?.entries.add(
-        OperationSubEntry(
-          timestamp: DateTime.now(),
-          message: data['message'] as String? ?? '',
-          level: parseLogLevel(data['level'] as String? ?? 'info'),
-        ),
-      );
-
-    case 'session_query':
-      state.activeOperations[data['sessionId'] as String? ?? '']?.entries.add(
-        OperationSubEntry(
-          timestamp: DateTime.now(),
-          message: data['query'] as String? ?? '',
-          duration: (data['duration'] as num?)?.toDouble(),
-        ),
-      );
-
-    case 'session_end':
+    case 'scope_end':
       final id = data['id'] as String? ?? '';
       final op = state.activeOperations.remove(id);
       if (op != null) {
