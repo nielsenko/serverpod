@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod_log/serverpod_log.dart';
+import 'package:serverpod/src/server/log_manager/log_writers/database_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/vm_service_log_writer.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
@@ -42,7 +43,13 @@ class Serverpod {
   late final Log log;
 
   /// The writer chain shared by both framework and session logging.
-  late final LogWriter logWriter;
+  late final MultiLogWriter logWriter;
+
+  /// Late-attached writer that persists session logs to the database. Set
+  /// when [config.sessionLogs.persistentEnabled] is true and the dialect is
+  /// not sqlite. Created (unattached) before the database is up; receives
+  /// its [Session] once [_internalSession] is available.
+  DatabaseLogWriter? _databaseLogWriter;
 
   late Session _internalSession;
 
@@ -534,6 +541,17 @@ class Serverpod {
     // use the same id (e.g. from --server-id) instead of staying 'default'.
     this.serverId = this.config.serverId;
 
+    // If persistent session logging is enabled (and we're not on sqlite,
+    // which lacks the log tables), append a DatabaseLogWriter to the chain.
+    // The Session it needs is attached later in _innerInitializeServerpod.
+    final dbConfig = this.config.database;
+    if (this.config.sessionLogs.persistentEnabled &&
+        dbConfig != null &&
+        dbConfig.dialect != DatabaseDialect.sqlite) {
+      _databaseLogWriter = DatabaseLogWriter();
+      logWriter.add(_databaseLogWriter!);
+    }
+
     _writeLifecycleMessage(_getCommandLineArgsString());
 
     _internalLogVerbose(this.config.toString());
@@ -629,6 +647,10 @@ class Serverpod {
     endpoints.initializeEndpoints(server);
 
     _internalSession = InternalSession(server: server, enableLogging: false);
+
+    // Attach the internal session to the database log writer (if installed)
+    // now that the database pool is up and a Session can be constructed.
+    _databaseLogWriter?.attach(_internalSession);
     _internalLoggingSession = InternalSession(
       server: server,
       enableLogging: true,
@@ -1236,6 +1258,19 @@ class Serverpod {
         );
       },
     );
+
+    // Drain the database log writer before tearing the pool down so its
+    // in-flight close rows reach the database instead of racing pool.stop().
+    try {
+      await _databaseLogWriter?.close();
+    } catch (e, stackTrace) {
+      shutdownError = e;
+      _reportException(
+        e,
+        stackTrace,
+        message: 'Error draining database log writer',
+      );
+    }
 
     // This needs to be closed last as it is used by the other services.
     try {

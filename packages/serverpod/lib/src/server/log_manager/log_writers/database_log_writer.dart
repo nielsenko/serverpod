@@ -17,29 +17,76 @@ import '../session_log_keys.dart';
 /// [SessionLogManager], potentially others later) gets persistence for free.
 @internal
 class DatabaseLogWriter extends slog.LogWriter {
-  /// Internal session used to perform the writes.
-  final Session _internalSession;
+  /// Internal session used to perform the writes. Set late via [attach];
+  /// while null all operations are no-ops, letting the writer sit safely in
+  /// the global chain before the database is initialised.
+  Session? _internalSession;
 
   /// Per-scope state, keyed by [slog.LogScope.id].
   final Map<String, _SessionState> _sessions = {};
 
-  DatabaseLogWriter({required Session internalSession})
-    : _internalSession = internalSession;
+  /// In-flight DB write futures, tracked so [close] can drain them before the
+  /// database pool is torn down. Each scope/log/closeScope entry registers
+  /// itself here for the duration of its underlying query.
+  final Set<Future<void>> _inflight = {};
+
+  /// Once true, new events are dropped; in-flight writes are allowed to
+  /// finish via [close]'s bounded drain. Prevents the writer from touching
+  /// the pool while (or after) shutdown nulls it out.
+  bool _closing = false;
+
+  /// Upper bound on how long [close] waits for in-flight writes before giving
+  /// up. A stuck pool must not be able to hang server shutdown.
+  static const _drainTimeout = Duration(seconds: 5);
+
+  DatabaseLogWriter();
+
+  /// Attaches the [Session] used to perform writes. Until called, the writer
+  /// silently drops every event so it can be installed in the writer chain
+  /// before the database is up.
+  void attach(Session session) {
+    _internalSession = session;
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closing) return;
+    _closing = true;
+    // Drain writes that were already dispatched before shutdown so their
+    // close rows reach the database; bounded so an unhealthy pool can't
+    // block shutdown indefinitely. Errors on individual writes are expected
+    // (the pool may be closing underneath us) and are swallowed.
+    final pending = _inflight.map((f) => f.catchError((_) {})).toList();
+    await Future.wait(pending).timeout(
+      _drainTimeout,
+      onTimeout: () => const <void>[],
+    );
+    _internalSession = null;
+  }
 
   @override
   Future<void> openScope(slog.LogScope scope) async {
+    final session = _internalSession;
+    if (session == null || _closing) return;
     if (!_isSessionScope(scope)) return;
     if (_sessions.containsKey(scope.id)) return;
 
     final state = _SessionState();
     _sessions[scope.id] = state;
 
+    await _track(_openScope(session, scope, state));
+  }
+
+  Future<void> _openScope(
+    Session session,
+    slog.LogScope scope,
+    _SessionState state,
+  ) async {
     try {
       final row = _buildSessionRow(scope, isOpen: true);
-      final inserted = await _internalSession.db
-          .insertRow<proto.SessionLogEntry>(
-            row,
-          );
+      final inserted = await session.db.insertRow<proto.SessionLogEntry>(
+        row,
+      );
       final id = inserted.id;
       if (id == null) {
         state.sessionLogId.completeError(
@@ -55,12 +102,23 @@ class DatabaseLogWriter extends slog.LogWriter {
 
   @override
   Future<void> log(slog.LogEntry entry) async {
+    final session = _internalSession;
+    if (session == null || _closing) return;
     final state = _sessions[entry.scope.id];
     if (state == null) return;
 
     final type = entry.metadata?[SessionEntryKeys.type] as String?;
     if (type == null) return;
 
+    await _track(_log(session, entry, state, type));
+  }
+
+  Future<void> _log(
+    Session session,
+    slog.LogEntry entry,
+    _SessionState state,
+    String type,
+  ) async {
     int sessionLogId;
     try {
       sessionLogId = await state.sessionLogId.future;
@@ -72,16 +130,16 @@ class DatabaseLogWriter extends slog.LogWriter {
     state.entryOrder++;
     switch (type) {
       case SessionEntryTypeValues.log:
-        await _internalSession.db.insertRow<proto.LogEntry>(
+        await session.db.insertRow<proto.LogEntry>(
           _buildLogRow(entry, sessionLogId, state.entryOrder),
         );
       case SessionEntryTypeValues.query:
         state.queryCount++;
-        await _internalSession.db.insertRow<proto.QueryLogEntry>(
+        await session.db.insertRow<proto.QueryLogEntry>(
           _buildQueryRow(entry, sessionLogId, state.entryOrder),
         );
       case SessionEntryTypeValues.message:
-        await _internalSession.db.insertRow<proto.MessageLogEntry>(
+        await session.db.insertRow<proto.MessageLogEntry>(
           _buildMessageRow(entry, sessionLogId, state.entryOrder),
         );
       default:
@@ -98,9 +156,31 @@ class DatabaseLogWriter extends slog.LogWriter {
     Object? error,
     StackTrace? stackTrace,
   }) async {
+    final session = _internalSession;
+    if (session == null || _closing) return;
     final state = _sessions.remove(scope.id);
     if (state == null) return;
 
+    await _track(
+      _closeScope(
+        session,
+        scope,
+        state,
+        duration: duration,
+        error: error,
+        stackTrace: stackTrace,
+      ),
+    );
+  }
+
+  Future<void> _closeScope(
+    Session session,
+    slog.LogScope scope,
+    _SessionState state, {
+    required Duration duration,
+    Object? error,
+    StackTrace? stackTrace,
+  }) async {
     int sessionLogId;
     try {
       sessionLogId = await state.sessionLogId.future;
@@ -119,7 +199,16 @@ class DatabaseLogWriter extends slog.LogWriter {
       error: error?.toString(),
       stackTrace: stackTrace?.toString(),
     );
-    await _internalSession.db.updateRow<proto.SessionLogEntry>(row);
+    await session.db.updateRow<proto.SessionLogEntry>(row);
+  }
+
+  Future<void> _track(Future<void> work) async {
+    _inflight.add(work);
+    try {
+      await work;
+    } finally {
+      _inflight.remove(work);
+    }
   }
 
   // ---------------------------------------------------------------------------
