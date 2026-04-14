@@ -5,6 +5,7 @@ import 'package:serverpod_log/serverpod_log.dart';
 
 import '../../generated/protocol.dart' as proto;
 import '../session.dart';
+import 'session_log_keys.dart';
 
 const double _microNormalizer = 1000 * 1000;
 
@@ -61,18 +62,33 @@ class SessionLogManager {
     };
   }
 
+  String _sessionTypeValue() => switch (_session) {
+    MethodCallSession() => SessionTypeValues.method,
+    MethodStreamSession() => SessionTypeValues.methodStream,
+    StreamingSession() => SessionTypeValues.stream,
+    FutureCallSession() => SessionTypeValues.futureCall,
+    WebCallSession() => SessionTypeValues.web,
+    InternalSession() => SessionTypeValues.internal,
+    _ => SessionTypeValues.unknown,
+  };
+
   Future<void> _openScope() async {
     if (_scopeOpened) return;
     _scopeOpened = true;
 
+    final session = _session;
     _scope = LogScope(
-      id: '${_session.sessionId.hashCode}',
+      id: '${session.sessionId.hashCode}',
       label: _buildLabel(),
-      startTime: _session.startTime,
+      startTime: session.startTime,
       metadata: {
-        'serverId': _serverId,
-        'endpoint': _session.endpoint,
-        'method': _session.method,
+        SessionScopeKeys.sessionType: _sessionTypeValue(),
+        SessionScopeKeys.sessionId: session.sessionId.toString(),
+        SessionScopeKeys.endpoint: session.endpoint,
+        SessionScopeKeys.method: session.method,
+        SessionScopeKeys.serverId: _serverId,
+        if (session is FutureCallSession)
+          SessionScopeKeys.futureCallName: session.futureCallName,
       },
     );
     await _writer.openScope(_scope!);
@@ -111,6 +127,9 @@ class SessionLogManager {
         scope: scope,
         error: error,
         stackTrace: stackTrace,
+        metadata: const {
+          SessionEntryKeys.type: SessionEntryTypeValues.log,
+        },
       ),
     );
   }
@@ -147,10 +166,10 @@ class SessionLogManager {
         scope: scope,
         error: error,
         metadata: {
-          'type': 'query',
-          'duration': executionTime,
-          'numRows': numRowsAffected,
-          'slow': slow,
+          SessionEntryKeys.type: SessionEntryTypeValues.query,
+          SessionEntryKeys.queryDuration: executionTime,
+          SessionEntryKeys.queryNumRows: numRowsAffected,
+          SessionEntryKeys.querySlow: slow,
         },
       ),
     );
@@ -190,6 +209,14 @@ class SessionLogManager {
         scope: scope,
         error: error,
         stackTrace: stackTrace,
+        metadata: {
+          SessionEntryKeys.type: SessionEntryTypeValues.message,
+          SessionEntryKeys.messageEndpoint: endpointName,
+          SessionEntryKeys.messageName: messageName,
+          SessionEntryKeys.messageId: messageId,
+          SessionEntryKeys.messageDuration: executionTime,
+          SessionEntryKeys.messageSlow: slow,
+        },
       ),
     );
   }
