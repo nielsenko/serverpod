@@ -57,7 +57,7 @@ class Log {
   /// passes the entry to the writer.
   void call(LogLevel level, LogEntry Function() factory) {
     if (level.index < logLevel.index) return;
-    _writer.log(factory());
+    unawaited(_writer.log(factory()));
   }
 }
 

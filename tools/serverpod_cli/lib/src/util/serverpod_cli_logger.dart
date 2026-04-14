@@ -29,15 +29,10 @@ class ServerpodCliLogger extends cli.Logger {
       _log = Log(writer, logLevel: logLevel),
       super(_mapLevel(logLevel));
 
-  /// Releases any resources held by the underlying writer (e.g. closes the
-  /// background isolate spawned by [IsolatedLogWriter]). Without this the
-  /// Dart process stays alive waiting on the idle isolate.
-  Future<void> close() async {
-    final writer = _writer;
-    if (writer is IsolatedLogWriter) {
-      await writer.close();
-    }
-  }
+  /// Releases any resources held by the underlying writer. Without this
+  /// an [IsolatedLogWriter] would keep its background isolate alive and
+  /// prevent the Dart process from exiting.
+  Future<void> close() => _writer.close();
 
   @override
   set logLevel(cli.LogLevel level) {

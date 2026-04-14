@@ -10,6 +10,8 @@ import 'log_types.dart';
 /// All operations are forwarded to the isolate and awaited; the caller
 /// chooses whether to await the returned future.
 class IsolatedLogWriter extends IsolatedObject<LogWriter> implements LogWriter {
+  final Set<Future<void>> _inflight = {};
+
   /// Creates an [IsolatedLogWriter] that runs the writer produced by
   /// [factory] on a dedicated isolate.
   IsolatedLogWriter(LogWriter Function() factory) : super(factory);
@@ -17,7 +19,23 @@ class IsolatedLogWriter extends IsolatedObject<LogWriter> implements LogWriter {
   @override
   Future<void> log(LogEntry entry) async {
     if (isClosed) return;
-    await evaluate((w) => w.log(entry));
+    final Future<void> f = evaluate((w) => w.log(entry));
+    _inflight.add(f);
+    try {
+      await f;
+    } finally {
+      _inflight.remove(f);
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    // Drain in-flight log writes before tearing the isolate down, so
+    // fire-and-forget callers (Log.call does not await the returned
+    // Future) do not see their pending writes reject with StateError
+    // from [IsolatedObject.close].
+    await _inflight.wait;
+    await super.close();
   }
 
   @override

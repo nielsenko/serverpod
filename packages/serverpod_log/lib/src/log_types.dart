@@ -1,7 +1,3 @@
-/// Generic logging types. Framework-agnostic, no serverpod-specific
-/// dependencies. Eventually intended to live in a shared package
-/// (e.g., cli_tools).
-
 /// Log severity level.
 enum LogLevel {
   debug,
@@ -11,12 +7,12 @@ enum LogLevel {
   fatal,
 }
 
-/// A scoped operation. Scopes form a tree - every scope has a parent
-/// except the root scope.
+/// A scoped operation. Scopes form a tree - every scope has a parent except the
+/// root scope.
 ///
 /// A scope begins with [LogWriter.openScope] and ends with
-/// [LogWriter.closeScope]. Log entries within the scope reference it
-/// via [LogEntry.scope].
+/// [LogWriter.closeScope]. Log entries within the scope reference it via
+/// [LogEntry.scope].
 class LogScope {
   final String id;
   final String label;
@@ -93,6 +89,9 @@ abstract class LogWriter {
     Object? error,
     StackTrace? stackTrace,
   });
+
+  /// Releases any resources held by the writer.
+  Future<void> close() async {}
 }
 
 /// A [LogWriter] that fans out to multiple child writers.
@@ -107,12 +106,11 @@ class MultiLogWriter extends LogWriter {
   void add(LogWriter writer) => _writers.add(writer);
 
   @override
-  Future<void> log(LogEntry entry) =>
-      Future.wait(_writers.map((w) => w.log(entry)));
+  Future<void> log(LogEntry entry) => _writers.map((w) => w.log(entry)).wait;
 
   @override
   Future<void> openScope(LogScope scope) =>
-      Future.wait(_writers.map((w) => w.openScope(scope)));
+      _writers.map((w) => w.openScope(scope)).wait;
 
   @override
   Future<void> closeScope(
@@ -121,15 +119,18 @@ class MultiLogWriter extends LogWriter {
     required Duration duration,
     Object? error,
     StackTrace? stackTrace,
-  }) => Future.wait(
-    _writers.map(
-      (w) => w.closeScope(
-        scope,
-        success: success,
-        duration: duration,
-        error: error,
-        stackTrace: stackTrace,
-      ),
-    ),
-  );
+  }) => _writers
+      .map(
+        (w) => w.closeScope(
+          scope,
+          success: success,
+          duration: duration,
+          error: error,
+          stackTrace: stackTrace,
+        ),
+      )
+      .wait;
+
+  @override
+  Future<void> close() => _writers.map((w) => w.close()).wait;
 }
