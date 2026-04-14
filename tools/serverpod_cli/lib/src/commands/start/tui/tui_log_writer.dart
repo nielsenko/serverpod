@@ -75,7 +75,6 @@ class TuiLogWriter extends LogWriter {
           label: op.label,
           success: success,
           duration: duration,
-          entries: op.entries,
         ),
       );
     }

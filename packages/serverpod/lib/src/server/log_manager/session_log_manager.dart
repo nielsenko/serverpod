@@ -1,14 +1,14 @@
 import 'dart:async';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_log/serverpod_log.dart' as slog;
+import 'package:serverpod_log/serverpod_log.dart';
 
-import '../../generated/protocol.dart';
+import '../../generated/protocol.dart' as proto;
 import '../session.dart';
 
 const double _microNormalizer = 1000 * 1000;
 
-/// Manages logging for a single session using the new [slog.LogWriter] chain.
+/// Manages logging for a single session using the new [LogWriter] chain.
 ///
 /// Opens a scope when logging starts, routes entries through the writer
 /// chain (which includes VmServiceLogWriter and TextLogWriter; a
@@ -17,20 +17,20 @@ const double _microNormalizer = 1000 * 1000;
 @internal
 class SessionLogManager {
   final Session _session;
-  final slog.LogWriter _writer;
-  final LogSettings Function(Session) _settingsForSession;
+  final LogWriter _writer;
+  final proto.LogSettings Function(Session) _settingsForSession;
   final bool _disableSlowSessionLogging;
   final String _serverId;
 
-  slog.LogScope? _scope;
+  LogScope? _scope;
   final Stopwatch _stopwatch = Stopwatch();
   bool _scopeOpened = false;
 
   @internal
   SessionLogManager({
     required Session session,
-    required slog.LogWriter writer,
-    required LogSettings Function(Session) settingsForSession,
+    required LogWriter writer,
+    required proto.LogSettings Function(Session) settingsForSession,
     required String serverId,
     bool disableSlowSessionLogging = false,
   }) : _session = session,
@@ -65,7 +65,7 @@ class SessionLogManager {
     if (_scopeOpened) return;
     _scopeOpened = true;
 
-    _scope = slog.LogScope(
+    _scope = LogScope(
       id: '${_session.sessionId.hashCode}',
       label: _buildLabel(),
       startTime: _session.startTime,
@@ -81,12 +81,12 @@ class SessionLogManager {
   /// Logs an entry within this session.
   @internal
   Future<void> logEntry({
-    LogLevel? level,
+    proto.LogLevel? level,
     required String message,
     String? error,
     StackTrace? stackTrace,
   }) async {
-    final logLevel = level ?? LogLevel.info;
+    final logLevel = level ?? proto.LogLevel.info;
     var logSettings = _settingsForSession(_session);
     if (logLevel.index < logSettings.logLevel.index) return;
 
@@ -96,15 +96,15 @@ class SessionLogManager {
     if (scope == null) return;
 
     final newLevel = switch (logLevel) {
-      LogLevel.debug => slog.LogLevel.debug,
-      LogLevel.info => slog.LogLevel.info,
-      LogLevel.warning => slog.LogLevel.warning,
-      LogLevel.error => slog.LogLevel.error,
-      LogLevel.fatal => slog.LogLevel.fatal,
+      proto.LogLevel.debug => LogLevel.debug,
+      proto.LogLevel.info => LogLevel.info,
+      proto.LogLevel.warning => LogLevel.warning,
+      proto.LogLevel.error => LogLevel.error,
+      proto.LogLevel.fatal => LogLevel.fatal,
     };
 
     await _writer.log(
-      slog.LogEntry(
+      LogEntry(
         time: DateTime.now(),
         level: newLevel,
         message: message,
@@ -140,9 +140,9 @@ class SessionLogManager {
     if (scope == null) return;
 
     await _writer.log(
-      slog.LogEntry(
+      LogEntry(
         time: DateTime.now(),
-        level: slog.LogLevel.debug,
+        level: LogLevel.debug,
         message: query,
         scope: scope,
         error: error,
@@ -183,9 +183,9 @@ class SessionLogManager {
     if (scope == null) return;
 
     await _writer.log(
-      slog.LogEntry(
+      LogEntry(
         time: DateTime.now(),
-        level: slog.LogLevel.info,
+        level: LogLevel.info,
         message: '$messageName ($endpointName)',
         scope: scope,
         error: error,

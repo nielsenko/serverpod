@@ -1,12 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:serverpod/serverpod.dart';
+import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
-import 'package:serverpod_log/serverpod_log.dart' as log_types;
-import 'package:serverpod_log/serverpod_log.dart' as log_api;
-import 'package:serverpod_log/serverpod_log.dart'
-    show IsolatedLogWriter, TextLogWriter;
+import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/vm_service_log_writer.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
@@ -42,10 +39,10 @@ class Serverpod {
   static Serverpod? _instance;
 
   /// The framework logger. Routes messages through the [LogWriter] chain.
-  late final log_api.Log log;
+  late final Log log;
 
   /// The writer chain shared by both framework and session logging.
-  late final log_types.LogWriter logWriter;
+  late final LogWriter logWriter;
 
   late Session _internalSession;
 
@@ -473,8 +470,8 @@ class Serverpod {
     final textWriter = stdout.hasTerminal
         ? IsolatedLogWriter(TextLogWriter.new)
         : TextLogWriter();
-    logWriter = log_types.MultiLogWriter([textWriter, VmServiceLogWriter()]);
-    log = log_api.Log(logWriter, logLevel: log_types.LogLevel.info);
+    logWriter = MultiLogWriter([textWriter, VmServiceLogWriter()]);
+    log = Log(logWriter, logLevel: LogLevel.info);
 
     _writeLifecycleMessage(
       'SERVERPOD version: $serverpodVersion, dart: ${Platform.version}, time: ${DateTime.now().toUtc()}',

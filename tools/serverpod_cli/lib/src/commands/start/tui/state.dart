@@ -1,23 +1,4 @@
-import 'package:serverpod_log/serverpod_log.dart';
-
 import 'bounded_queue_list.dart';
-
-/// A sub-entry within a tracked operation (session log or query).
-final class OperationSubEntry {
-  OperationSubEntry({
-    required this.timestamp,
-    required this.message,
-    this.level,
-    this.duration,
-  });
-
-  final DateTime timestamp;
-  final String message;
-  final LogLevel? level;
-
-  /// Query duration in seconds, if this is a query sub-entry.
-  final double? duration;
-}
 
 /// A tracked operation (server session or CLI progress).
 ///
@@ -40,9 +21,6 @@ final class TrackedOperation {
 
   /// Duration in seconds, set on completion.
   double? duration;
-
-  /// Sub-entries (logs, queries) that occurred during this operation.
-  final List<OperationSubEntry> entries = [];
 }
 
 /// Completed tracked operation, stored in the log history.
@@ -51,7 +29,6 @@ final class CompletedOperation {
     required this.label,
     required this.success,
     required this.duration,
-    required this.entries,
     DateTime? completedAt,
   }) : completedAt = completedAt ?? DateTime.now();
 
@@ -59,10 +36,6 @@ final class CompletedOperation {
   final bool success;
   final Duration duration;
   final DateTime completedAt;
-  final List<OperationSubEntry> entries;
-
-  /// Whether the user has expanded this entry to see sub-entries.
-  bool expanded = false;
 }
 
 /// Central state for the TUI, mutated by the backend and rendered by nocterm.
@@ -94,9 +67,6 @@ final class ServerWatchState {
 
   /// Whether the help overlay is visible.
   bool showHelp = false;
-
-  /// Whether completed operations are expanded to show sub-entries.
-  bool expandOperations = false;
 
   /// Maximum number of log entries to keep.
   static const maxLogEntries = 10000;

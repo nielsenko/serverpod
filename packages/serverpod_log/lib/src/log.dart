@@ -5,6 +5,10 @@ import 'log_types.dart';
 /// Symbol used to store the current [LogScope] in Zone values.
 const Symbol logScopeKey = #_logScope;
 
+int _scopeCounter = 0;
+String _newScopeId(String label) =>
+    '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}_${++_scopeCounter}';
+
 /// Runs [body] with [rootScope] installed in the Zone.
 Future<T> runWithRootScope<T>({
   required LogScope rootScope,
@@ -125,7 +129,7 @@ extension LogScoping on Log {
     Map<String, Object?>? metadata,
   }) async {
     final scope = currentScope.child(
-      id: '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}',
+      id: _newScopeId(label),
       label: label,
       metadata: metadata,
     );
@@ -166,7 +170,7 @@ extension LogScoping on Log {
     Map<String, Object?>? metadata,
   }) {
     final scope = currentScope.child(
-      id: '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}',
+      id: _newScopeId(label),
       label: label,
       metadata: metadata,
     );

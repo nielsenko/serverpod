@@ -3,7 +3,7 @@ import 'dart:io';
 import 'log_types.dart';
 import 'spinner_log_writer.dart';
 
-bool _ansiSupported = isInteractiveTerminal && stdout.supportsAnsiEscapes;
+bool get _ansiSupported => isInteractiveTerminal && stdout.supportsAnsiEscapes;
 
 String _green(String text) => _ansiSupported ? '\x1B[92m$text\x1B[0m' : text;
 String _yellow(String text) => _ansiSupported ? '\x1B[93m$text\x1B[0m' : text;

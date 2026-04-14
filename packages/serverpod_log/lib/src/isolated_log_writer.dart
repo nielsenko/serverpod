@@ -7,22 +7,17 @@ import 'log_types.dart';
 /// updating even when the calling isolate's event loop is blocked by heavy
 /// synchronous work.
 ///
-/// All operations are forwarded to the isolate. [log] is fire-and-forget;
-/// [openScope] and [closeScope] are awaited so callers can sequence scope
-/// boundaries.
+/// All operations are forwarded to the isolate and awaited; the caller
+/// chooses whether to await the returned future.
 class IsolatedLogWriter extends IsolatedObject<LogWriter> implements LogWriter {
   /// Creates an [IsolatedLogWriter] that runs the writer produced by
   /// [factory] on a dedicated isolate.
   IsolatedLogWriter(LogWriter Function() factory) : super(factory);
 
-  void _fireAndForget(void Function(LogWriter) fn) async {
-    if (isClosed) return;
-    await evaluate(fn);
-  }
-
   @override
   Future<void> log(LogEntry entry) async {
-    _fireAndForget((w) => w.log(entry));
+    if (isClosed) return;
+    await evaluate((w) => w.log(entry));
   }
 
   @override

@@ -4,7 +4,6 @@ import 'package:clock/clock.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/protocol.dart';
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod/src/server/log_manager/log.dart';
 
 import 'future_call_diagnostics_service.dart';
 import 'future_call_scanner.dart';

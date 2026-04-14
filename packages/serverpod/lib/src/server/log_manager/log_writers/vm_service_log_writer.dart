@@ -1,16 +1,11 @@
 import 'dart:developer' as developer;
 
-import '../log_types.dart';
+import 'package:serverpod_log/serverpod_log.dart';
 
-/// A [LogWriter] that posts structured log events via the VM service
-/// extension `ext.serverpod.log`.
-///
-/// The CLI subscribes to these events via `vmService.onExtensionEvent`
-/// to render them in the TUI. No session dependency - works for both
-/// framework and session-scoped messages.
-///
-/// This writer is only effective when the VM service is enabled (dev
-/// mode). In production, [developer.postEvent] is a no-op.
+/// Posts structured log events via the VM service extension
+/// `ext.serverpod.log`, so CLI clients can subscribe via
+/// `vmService.onExtensionEvent` and render them. In production where
+/// the VM service is disabled, [developer.postEvent] is a no-op.
 class VmServiceLogWriter extends LogWriter {
   @override
   Future<void> log(LogEntry entry) async {

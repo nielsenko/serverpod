@@ -5,6 +5,8 @@ import '../../../util/serverpod_cli_logger.dart';
 import 'app.dart';
 import 'state.dart';
 
+int _actionCounter = 0;
+
 /// Dispatches a structured server log event to the TUI state.
 void handleServerLogEvent(AppStateHolder holder, Event event) {
   if (event.extensionKind != 'ext.serverpod.log') return;
@@ -49,7 +51,6 @@ void handleServerLogEvent(AppStateHolder holder, Event event) {
             duration: serverDuration != null
                 ? Duration(microseconds: (serverDuration * 1000000).round())
                 : op.stopwatch.elapsed,
-            entries: op.entries,
           ),
         );
       }
@@ -70,7 +71,8 @@ void runTrackedAction(
   if (state.actionBusy || !state.serverReady) return;
 
   state.actionBusy = true;
-  final id = '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}';
+  final id =
+      '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}_${++_actionCounter}';
   state.activeOperations[id] = TrackedOperation(id: id, label: label);
   holder.markDirty();
 
@@ -99,7 +101,6 @@ void _completeTrackedAction(
         label: op.label,
         success: success,
         duration: op.stopwatch.elapsed,
-        entries: op.entries,
       ),
     );
   }

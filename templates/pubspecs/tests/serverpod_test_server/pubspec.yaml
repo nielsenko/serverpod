@@ -15,8 +15,8 @@ dependencies:
   relic: ^1.2.0
   serverpod: SERVERPOD_VERSION
   serverpod_auth_server: SERVERPOD_VERSION
-  serverpod_log: SERVERPOD_VERSION
   serverpod_cloud_storage_s3: SERVERPOD_VERSION
+  serverpod_log: SERVERPOD_VERSION
   serverpod_test_module_server:
     path: ../serverpod_test_module/serverpod_test_module_server
   serverpod_test_shared:

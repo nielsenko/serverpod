@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod/src/server/features.dart';
-import 'package:serverpod_log/serverpod_log.dart' hide LogLevel;
 import 'package:serverpod/src/server/log_manager/session_log_manager.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 

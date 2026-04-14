@@ -173,11 +173,9 @@ class CompletedOperationWidget extends StatelessComponent {
   const CompletedOperationWidget({
     super.key,
     required this.operation,
-    this.expanded = false,
   });
 
   final CompletedOperation operation;
-  final bool expanded;
 
   @override
   Component build(BuildContext context) {
@@ -185,54 +183,21 @@ class CompletedOperationWidget extends StatelessComponent {
     final icon = operation.success ? '✓' : '✗';
     final color = operation.success ? st.success : st.failure;
     final durationStr = formatDuration(operation.duration);
-    final showEntries = !operation.success || expanded;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    return Row(
       children: [
-        Row(
-          children: [
-            Text('  $icon  ', style: TextStyle(color: color)),
-            const SizedBox(width: 1),
-            Text(
-              _timeFormat.format(operation.completedAt.toLocal()),
-              style: const TextStyle(fontWeight: FontWeight.dim),
-            ),
-            const SizedBox(width: 1),
-            Text(
-              '${operation.label} ($durationStr) ',
-              style: TextStyle(color: color),
-            ),
-            Expanded(child: Divider(color: st.subtleDivider)),
-          ],
+        Text('  $icon  ', style: TextStyle(color: color)),
+        const SizedBox(width: 1),
+        Text(
+          _timeFormat.format(operation.completedAt.toLocal()),
+          style: const TextStyle(fontWeight: FontWeight.dim),
         ),
-        if (showEntries && operation.entries.isNotEmpty)
-          for (final entry in operation.entries)
-            Padding(
-              padding: const EdgeInsets.only(left: 6),
-              child: Row(
-                children: [
-                  if (entry.level != null)
-                    Text(
-                      entry.level!.name,
-                      style: TextStyle(
-                        color: entry.level == LogLevel.error
-                            ? st.errorLevel
-                            : st.debugLevel,
-                      ),
-                    )
-                  else
-                    Text('query', style: TextStyle(color: st.debugLevel)),
-                  const SizedBox(width: 1),
-                  Expanded(child: Text(entry.message)),
-                  if (entry.duration != null)
-                    Text(
-                      ' (${formatDuration(Duration(microseconds: (entry.duration! * 1000000).round()))})',
-                      style: const TextStyle(fontWeight: FontWeight.dim),
-                    ),
-                ],
-              ),
-            ),
+        const SizedBox(width: 1),
+        Text(
+          '${operation.label} ($durationStr) ',
+          style: TextStyle(color: color),
+        ),
+        Expanded(child: Divider(color: st.subtleDivider)),
       ],
     );
   }
@@ -276,46 +241,11 @@ class _TrackedOperationWidgetState extends State<TrackedOperationWidget> {
     final op = component.operation;
     final frame = _spinnerFrames[_frameIndex % _spinnerFrames.length];
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    return Row(
       children: [
-        Row(
-          children: [
-            Text('  $frame  ', style: TextStyle(color: st.spinner)),
-            const SizedBox(width: 14),
-            Expanded(child: Text('${op.label}...')),
-          ],
-        ),
-        // Sub-entries indented
-        for (final entry in op.entries)
-          Padding(
-            padding: const EdgeInsets.only(left: 4),
-            child: Row(
-              children: [
-                if (entry.level != null)
-                  Text(
-                    entry.level!.name,
-                    style: TextStyle(
-                      color: entry.level == LogLevel.error
-                          ? st.errorLevel
-                          : st.debugLevel,
-                    ),
-                  )
-                else
-                  Text(
-                    'query',
-                    style: TextStyle(color: st.debugLevel),
-                  ),
-                const SizedBox(width: 1),
-                Expanded(child: Text(entry.message)),
-                if (entry.duration != null)
-                  Text(
-                    ' (${formatDuration(Duration(microseconds: (entry.duration! * 1000000).round()))})',
-                    style: const TextStyle(fontWeight: FontWeight.dim),
-                  ),
-              ],
-            ),
-          ),
+        Text('  $frame  ', style: TextStyle(color: st.spinner)),
+        const SizedBox(width: 14),
+        Expanded(child: Text('${op.label}...')),
       ],
     );
   }

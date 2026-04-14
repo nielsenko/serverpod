@@ -2,6 +2,16 @@
 
 This document describes the nocterm-based terminal UI for the `serverpod start` command, replacing plain text logging with an interactive dashboard.
 
+> **Note:** This document is the original design proposal. The implementation
+> has since landed and the logging architecture has been generalised - see
+> [`logging.md`](logging.md) for the current `LogWriter`/`LogScope` types
+> and the live VM-service event protocol (`scope_start` / `scope_end` / `log`).
+> References below to `TuiLogger`, `IsolatedLogger`, `TextStdOutLogWriter`,
+> `JsonStdOutLogWriter`, and the `session_start` / `session_log` / `session_query`
+> / `session_end` event names are historical; treat the layout, key bindings,
+> and component breakdown as authoritative and the wire protocol details as
+> superseded.
+
 ## Current State
 
 `serverpod start --watch` outputs plain text log messages to stdout via the `cli_tools` `Logger` singleton. Server process stdout/stderr is forwarded directly to the terminal. There is no interactivity - the only control is Ctrl+C to quit.
