@@ -196,7 +196,7 @@ class SessionLogManager {
 
   /// Finalizes the session log. Called when the session closes.
   @internal
-  Future<int?> finalizeLog(
+  Future<void> finalizeLog(
     Session session, {
     String? authenticatedUserId,
     String? exception,
@@ -230,7 +230,5 @@ class SessionLogManager {
         _scope = null;
       }
     }
-
-    return null;
   }
 }

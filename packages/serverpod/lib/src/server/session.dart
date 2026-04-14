@@ -179,13 +179,12 @@ abstract class Session implements DatabaseSession {
   /// database. After a session has been closed, you should not call any
   /// more methods on it. Optionally pass in an [error]/exception and
   /// [stackTrace] if the session ended with an error and it should be written
-  /// to the logs. Returns the session id, if the session has been logged to the
-  /// database.
-  Future<int?> close({
+  /// to the logs.
+  Future<void> close({
     dynamic error,
     StackTrace? stackTrace,
   }) async {
-    if (_closed) return null;
+    if (_closed) return;
     _closed = true;
 
     var willCloseListeners = _willCloseListeners.toList();
@@ -204,7 +203,7 @@ abstract class Session implements DatabaseSession {
       }
 
       server.messageCentral.removeListenersForSession(this);
-      return await _logManager?.finalizeLog(
+      await _logManager?.finalizeLog(
         this,
         exception: error?.toString(),
         stackTrace: stackTrace,
@@ -217,7 +216,6 @@ abstract class Session implements DatabaseSession {
         stackTrace: stackTrace,
       );
     }
-    return null;
   }
 
   /// Logs a message. Default [LogLevel] is [LogLevel.info]. The log is written
@@ -355,9 +353,6 @@ class StreamingSession extends Session {
 
   /// The underlying web socket that handles communication with the server.
   final RelicWebSocket webSocket;
-
-  /// Set if there is an open session log.
-  int? sessionLogId;
 
   String _endpoint;
 
