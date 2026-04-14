@@ -247,8 +247,22 @@ class SessionLogManager {
 
       final scope = _scope;
       if (scope != null) {
+        // Build a close-time scope copy with late-set metadata (slow flag,
+        // authenticated user id). Same id so stateful writers can look up
+        // their per-scope record; fresh metadata carries the final state.
+        final closeScope = LogScope(
+          id: scope.id,
+          label: scope.label,
+          startTime: scope.startTime,
+          parent: scope.parent,
+          metadata: {
+            ...?scope.metadata,
+            SessionScopeKeys.slow: isSlow,
+            SessionScopeKeys.authenticatedUserId: ?authenticatedUserId,
+          },
+        );
         await _writer.closeScope(
-          scope,
+          closeScope,
           success: exception == null,
           duration: _stopwatch.elapsed,
           error: exception != null ? Exception(exception) : null,

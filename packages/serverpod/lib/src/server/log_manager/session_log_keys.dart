@@ -31,6 +31,10 @@ abstract final class SessionScopeKeys {
   /// Authenticated user identifier. Set late (typically at session close)
   /// since authentication may complete after the session opens.
   static const authenticatedUserId = 'serverpod.authenticatedUserId';
+
+  /// Whether the session as a whole exceeded the slow-session threshold.
+  /// Set late (at session close) since it depends on the final duration.
+  static const slow = 'serverpod.slow';
 }
 
 /// Keys set on `LogEntry.metadata` to discriminate log/query/message entries
