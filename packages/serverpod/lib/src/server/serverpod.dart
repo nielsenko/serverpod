@@ -541,6 +541,14 @@ class Serverpod {
     // use the same id (e.g. from --server-id) instead of staying 'default'.
     this.serverId = this.config.serverId;
 
+    // Sync Log's level with the configured loggingMode now that config is
+    // loaded. Without this, [logVerbose] (which dispatches through
+    // log.debug) would be silently filtered even when the user asked for
+    // verbose output.
+    if (this.config.loggingMode == ServerpodLoggingMode.verbose) {
+      log.logLevel = LogLevel.debug;
+    }
+
     // If persistent session logging is enabled (and we're not on sqlite,
     // which lacks the log tables), append a DatabaseLogWriter to the chain.
     // The Session it needs is attached later in _innerInitializeServerpod.
