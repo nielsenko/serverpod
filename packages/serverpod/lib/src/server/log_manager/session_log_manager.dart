@@ -27,6 +27,18 @@ class SessionLogManager {
   final Stopwatch _stopwatch = Stopwatch();
   bool _scopeOpened = false;
 
+  /// Fire-and-forget log/query/message writes tracked so [finalizeLog] can
+  /// drain them before closing the scope. Without this, a writer's close
+  /// path can tear down per-scope state while an in-flight entry is still
+  /// on its way to it, silently dropping the entry.
+  final Set<Future<void>> _pendingWrites = {};
+
+  /// Monotonic per-session counter assigned to each log/query/message
+  /// entry at *call* time (not at DB insert time) so the persisted order
+  /// reflects caller order even when entries race through the writer
+  /// chain.
+  int _nextEntryOrder = 0;
+
   @internal
   SessionLogManager({
     required Session session,
@@ -101,11 +113,26 @@ class SessionLogManager {
     required String message,
     String? error,
     StackTrace? stackTrace,
+  }) => _track(
+    _logEntry(
+      level: level,
+      message: message,
+      error: error,
+      stackTrace: stackTrace,
+    ),
+  );
+
+  Future<void> _logEntry({
+    proto.LogLevel? level,
+    required String message,
+    String? error,
+    StackTrace? stackTrace,
   }) async {
     final logLevel = level ?? proto.LogLevel.info;
     var logSettings = _settingsForSession(_session);
     if (logLevel.index < logSettings.logLevel.index) return;
 
+    final order = ++_nextEntryOrder;
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -127,8 +154,9 @@ class SessionLogManager {
         scope: scope,
         error: error,
         stackTrace: stackTrace,
-        metadata: const {
+        metadata: {
           SessionEntryKeys.type: SessionEntryTypeValues.log,
+          SessionEntryKeys.order: order,
         },
       ),
     );
@@ -137,6 +165,22 @@ class SessionLogManager {
   /// Logs a database query within this session.
   @internal
   Future<void> logQuery({
+    required String query,
+    required Duration duration,
+    required int? numRowsAffected,
+    required String? error,
+    required StackTrace stackTrace,
+  }) => _track(
+    _logQuery(
+      query: query,
+      duration: duration,
+      numRowsAffected: numRowsAffected,
+      error: error,
+      stackTrace: stackTrace,
+    ),
+  );
+
+  Future<void> _logQuery({
     required String query,
     required Duration duration,
     required int? numRowsAffected,
@@ -153,6 +197,7 @@ class SessionLogManager {
       return;
     }
 
+    final order = ++_nextEntryOrder;
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -167,6 +212,7 @@ class SessionLogManager {
         error: error,
         metadata: {
           SessionEntryKeys.type: SessionEntryTypeValues.query,
+          SessionEntryKeys.order: order,
           SessionEntryKeys.queryDuration: executionTime,
           SessionEntryKeys.queryNumRows: numRowsAffected,
           SessionEntryKeys.querySlow: slow,
@@ -178,6 +224,24 @@ class SessionLogManager {
   /// Logs a streaming message within this session.
   @internal
   Future<void> logMessage({
+    required String endpointName,
+    required String messageName,
+    required int messageId,
+    required Duration duration,
+    required String? error,
+    required StackTrace? stackTrace,
+  }) => _track(
+    _logMessage(
+      endpointName: endpointName,
+      messageName: messageName,
+      messageId: messageId,
+      duration: duration,
+      error: error,
+      stackTrace: stackTrace,
+    ),
+  );
+
+  Future<void> _logMessage({
     required String endpointName,
     required String messageName,
     required int messageId,
@@ -196,6 +260,7 @@ class SessionLogManager {
       return;
     }
 
+    final order = ++_nextEntryOrder;
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -211,6 +276,7 @@ class SessionLogManager {
         stackTrace: stackTrace,
         metadata: {
           SessionEntryKeys.type: SessionEntryTypeValues.message,
+          SessionEntryKeys.order: order,
           SessionEntryKeys.messageEndpoint: endpointName,
           SessionEntryKeys.messageName: messageName,
           SessionEntryKeys.messageId: messageId,
@@ -219,6 +285,15 @@ class SessionLogManager {
         },
       ),
     );
+  }
+
+  Future<void> _track(Future<void> work) async {
+    _pendingWrites.add(work);
+    try {
+      await work;
+    } finally {
+      _pendingWrites.remove(work);
+    }
   }
 
   /// Finalizes the session log. Called when the session closes.
@@ -244,6 +319,15 @@ class SessionLogManager {
         (logSettings.logFailedSessions && exception != null) ||
         _scopeOpened) {
       if (!_scopeOpened) await _openScope();
+
+      // Drain in-flight fire-and-forget writes before closing the scope.
+      // Writers like DatabaseLogWriter remove per-scope state on closeScope,
+      // so a log still routing through them at that moment would be dropped.
+      if (_pendingWrites.isNotEmpty) {
+        await Future.wait(
+          _pendingWrites.map((f) => f.catchError((_) {})).toList(),
+        );
+      }
 
       final scope = _scope;
       if (scope != null) {

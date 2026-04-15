@@ -43,6 +43,11 @@ abstract final class SessionEntryKeys {
   /// Discriminator for the entry kind: 'log', 'query', 'message'.
   static const type = 'serverpod.entryType';
 
+  /// Per-scope monotonic order of the entry. Assigned by the producer at
+  /// call time so the stored order matches caller order even when writes
+  /// race (e.g. the call that triggered the scope open finishes last).
+  static const order = 'serverpod.entryOrder';
+
   /// 'query' entry: query duration in seconds.
   static const queryDuration = 'serverpod.queryDuration';
 

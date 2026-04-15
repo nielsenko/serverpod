@@ -127,20 +127,23 @@ class DatabaseLogWriter extends slog.LogWriter {
       return;
     }
 
-    state.entryOrder++;
+    // Order is assigned by the producer at call time and carried on
+    // metadata; otherwise we'd record arrival order, which doesn't match
+    // caller order when writes race through the chain.
+    final order = entry.metadata?[SessionEntryKeys.order] as int? ?? 0;
     switch (type) {
       case SessionEntryTypeValues.log:
         await session.db.insertRow<proto.LogEntry>(
-          _buildLogRow(entry, sessionLogId, state.entryOrder),
+          _buildLogRow(entry, sessionLogId, order),
         );
       case SessionEntryTypeValues.query:
         state.queryCount++;
         await session.db.insertRow<proto.QueryLogEntry>(
-          _buildQueryRow(entry, sessionLogId, state.entryOrder),
+          _buildQueryRow(entry, sessionLogId, order),
         );
       case SessionEntryTypeValues.message:
         await session.db.insertRow<proto.MessageLogEntry>(
-          _buildMessageRow(entry, sessionLogId, state.entryOrder),
+          _buildMessageRow(entry, sessionLogId, order),
         );
       default:
         // Unknown discriminator; skip rather than guess.
@@ -334,9 +337,6 @@ class _SessionState {
   /// completes. log/closeScope await this before persisting child rows /
   /// updating the parent.
   final Completer<int> sessionLogId = Completer<int>();
-
-  /// Counter for ordering child rows in time of arrival.
-  int entryOrder = 0;
 
   /// Number of query entries seen, persisted on close as numQueries.
   int queryCount = 0;
