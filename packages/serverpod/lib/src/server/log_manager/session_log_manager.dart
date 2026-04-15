@@ -4,6 +4,7 @@ import 'package:meta/meta.dart';
 import 'package:serverpod_log/serverpod_log.dart';
 
 import '../../generated/protocol.dart' as proto;
+import '../serverpod.dart';
 import '../session.dart';
 import 'session_log_keys.dart';
 
@@ -305,6 +306,13 @@ class SessionLogManager {
       await work;
     } finally {
       _pendingWrites.remove(work);
+      // Fire-and-forget cleanup check. Runs on every log entry attempt so
+      // the cleanup interval is evaluated regularly, matching the
+      // pre-revamp behavior; [LogCleanupManager.performCleanup] guards
+      // with its own interval check so this is a no-op when not due.
+      unawaited(
+        _session.serverpod.logCleanupManager?.performCleanup(_session),
+      );
     }
   }
 

@@ -6,6 +6,8 @@ import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/database_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/json_stdout_log_writer.dart';
+import 'package:serverpod/src/server/log_manager/log_writers/non_session_log_writer.dart';
+import 'package:serverpod/src/server/log_manager/log_writers/session_text_stdout_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/vm_service_log_writer.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
@@ -46,11 +48,10 @@ class Serverpod {
   /// The writer chain shared by both framework and session logging.
   late final MultiLogWriter logWriter;
 
-  /// The console writer currently installed in [logWriter]. Held so it can
-  /// be swapped after config loads (text vs json, or removed when console
-  /// logging is disabled). Initially a [TextLogWriter] for pre-config
-  /// lifecycle output.
-  LogWriter? _consoleWriter;
+  /// The writers installed in [logWriter] before config is loaded - a
+  /// single text writer for bootstrap lifecycle output. Replaced in
+  /// [_installConfiguredWriters] once [config.sessionLogs] is known.
+  final List<LogWriter> _bootstrapWriters = [];
 
   /// Late-attached writer that persists session logs to the database. Set
   /// when [config.sessionLogs.persistentEnabled] is true and the dialect is
@@ -85,29 +86,55 @@ class Serverpod {
     }
   }
 
-  /// Replaces the initial text console writer with the one selected by
+  /// Replaces the bootstrap writer chain with the one selected by
   /// [config.sessionLogs]. Called once during construction after config
   /// has been loaded.
-  void _installConfiguredConsoleWriter() {
+  ///
+  /// The chain has three conceptually independent slots:
+  ///
+  ///   1. Framework writer - a TextLogWriter that ignores session-tagged
+  ///      scopes/entries. Always present so framework messages
+  ///      (lifecycle banners, [logVerbose], [LogCleanupManager], errors)
+  ///      remain visible regardless of session-echo configuration.
+  ///   2. Session-echo writer - emits session-tagged scopes in the
+  ///      configured format (legacy text columns or JSON). Present only
+  ///      when [config.sessionLogs.consoleEnabled] is true.
+  ///   3. VmServiceLogWriter - always present; a no-op when the VM
+  ///      service isn't attached.
+  ///
+  /// [DatabaseLogWriter] is installed separately below when persistent
+  /// logging is configured.
+  void _installConfiguredWriters() {
     final sessionLogs = config.sessionLogs;
-    final current = _consoleWriter;
-    if (current == null) return;
 
-    if (!sessionLogs.consoleEnabled) {
-      logWriter.remove(current);
-      _consoleWriter = null;
-      return;
+    final frameworkTextWriter = stdout.hasTerminal
+        ? IsolatedLogWriter(TextLogWriter.new)
+        : TextLogWriter();
+    final frameworkWriter = NonSessionLogWriter(frameworkTextWriter);
+
+    LogWriter? sessionEchoWriter;
+    if (sessionLogs.consoleEnabled) {
+      sessionEchoWriter = switch (sessionLogs.consoleLogFormat) {
+        ConsoleLogFormat.text => SessionTextStdOutLogWriter(),
+        ConsoleLogFormat.json => JsonStdOutLogWriter(),
+      };
     }
 
-    final LogWriter next = switch (sessionLogs.consoleLogFormat) {
-      ConsoleLogFormat.json => JsonStdOutLogWriter(),
-      ConsoleLogFormat.text => current,
-    };
-    if (identical(next, current)) return;
+    for (final w in _bootstrapWriters) {
+      logWriter.remove(w);
+    }
+    _bootstrapWriters.clear();
 
-    logWriter.remove(current);
-    logWriter.add(next);
-    _consoleWriter = next;
+    logWriter.add(frameworkWriter);
+    if (sessionEchoWriter != null) logWriter.add(sessionEchoWriter);
+
+    final dbConfig = config.database;
+    if (sessionLogs.persistentEnabled &&
+        dbConfig != null &&
+        dbConfig.dialect != DatabaseDialect.sqlite) {
+      _databaseLogWriter = DatabaseLogWriter();
+      logWriter.add(_databaseLogWriter!);
+    }
   }
 
   /// The last created [Serverpod]. In most cases the [Serverpod] is a singleton
@@ -505,14 +532,14 @@ class Serverpod {
     _instance = this;
 
     // Initialize logger early so _writeLifecycleMessage works immediately.
-    // Writer chain starts with a TextLogWriter + VmServiceLogWriter; the
-    // console writer may be swapped out once config is loaded (json vs
-    // text, or removed when console logging is disabled).
-    final textWriter = stdout.hasTerminal
+    // The chain is fully replaced in [_installConfiguredWriters] once
+    // config is loaded; until then a plain TextLogWriter is enough to
+    // surface bootstrap lifecycle output.
+    final bootstrapTextWriter = stdout.hasTerminal
         ? IsolatedLogWriter(TextLogWriter.new)
         : TextLogWriter();
-    _consoleWriter = textWriter;
-    logWriter = MultiLogWriter([textWriter, VmServiceLogWriter()]);
+    _bootstrapWriters.add(bootstrapTextWriter);
+    logWriter = MultiLogWriter([bootstrapTextWriter, VmServiceLogWriter()]);
     log = Log(logWriter, logLevel: LogLevel.info);
 
     _writeLifecycleMessage(
@@ -584,23 +611,12 @@ class Serverpod {
       log.logLevel = LogLevel.debug;
     }
 
-    // Now that config is loaded, reshape the console writer per
-    // config.sessionLogs: text (default), json, or disabled entirely.
-    // The initial TextLogWriter used for pre-config lifecycle output is
-    // swapped out in place so [logWriter]'s identity is preserved for
-    // anything holding a reference.
-    _installConfiguredConsoleWriter();
-
-    // If persistent session logging is enabled (and we're not on sqlite,
-    // which lacks the log tables), append a DatabaseLogWriter to the chain.
-    // The Session it needs is attached later in _innerInitializeServerpod.
-    final dbConfig = this.config.database;
-    if (this.config.sessionLogs.persistentEnabled &&
-        dbConfig != null &&
-        dbConfig.dialect != DatabaseDialect.sqlite) {
-      _databaseLogWriter = DatabaseLogWriter();
-      logWriter.add(_databaseLogWriter!);
-    }
+    // Now that config is loaded, replace the bootstrap writers with the
+    // configured chain: a framework writer that ignores session scopes,
+    // an optional session-echo writer (text or json, gated by
+    // sessionLogs.consoleEnabled), VmServiceLogWriter, and the
+    // DatabaseLogWriter when persistent logging is enabled.
+    _installConfiguredWriters();
 
     _writeLifecycleMessage(_getCommandLineArgsString());
 
@@ -1356,8 +1372,15 @@ class Serverpod {
 
   /// Logs a message to the console if the logging command line argument is set
   /// to verbose.
+  ///
+  /// Writes directly to stdout rather than through the [log] chain so that
+  /// framework-level verbose output (e.g. the error path in [Session.close]
+  /// when session logging is disabled) is visible regardless of
+  /// `sessionLogs.consoleEnabled` or writer configuration.
   void logVerbose(String message) {
-    log.debug(message);
+    if (config.loggingMode == ServerpodLoggingMode.verbose) {
+      stdout.writeln(message);
+    }
   }
 
   /// Logs a message to the console if the logging command line argument is set
