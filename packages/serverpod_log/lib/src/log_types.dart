@@ -105,6 +105,11 @@ class MultiLogWriter extends LogWriter {
   /// that needs a database session that doesn't exist yet at startup).
   void add(LogWriter writer) => _writers.add(writer);
 
+  /// Removes [writer] from the chain, if present. Counterpart to [add];
+  /// used when the chain needs to be reconfigured after construction
+  /// (e.g. swapping a console writer once config has been loaded).
+  bool remove(LogWriter writer) => _writers.remove(writer);
+
   @override
   Future<void> log(LogEntry entry) => _writers.map((w) => w.log(entry)).wait;
 

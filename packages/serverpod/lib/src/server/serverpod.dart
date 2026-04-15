@@ -5,6 +5,7 @@ import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/database_log_writer.dart';
+import 'package:serverpod/src/server/log_manager/log_writers/json_stdout_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/vm_service_log_writer.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
@@ -45,6 +46,12 @@ class Serverpod {
   /// The writer chain shared by both framework and session logging.
   late final MultiLogWriter logWriter;
 
+  /// The console writer currently installed in [logWriter]. Held so it can
+  /// be swapped after config loads (text vs json, or removed when console
+  /// logging is disabled). Initially a [TextLogWriter] for pre-config
+  /// lifecycle output.
+  LogWriter? _consoleWriter;
+
   /// Late-attached writer that persists session logs to the database. Set
   /// when [config.sessionLogs.persistentEnabled] is true and the dialect is
   /// not sqlite. Created (unattached) before the database is up; receives
@@ -76,6 +83,31 @@ class Serverpod {
     if (_shouldPrintLifecycleMessages) {
       log.info(message);
     }
+  }
+
+  /// Replaces the initial text console writer with the one selected by
+  /// [config.sessionLogs]. Called once during construction after config
+  /// has been loaded.
+  void _installConfiguredConsoleWriter() {
+    final sessionLogs = config.sessionLogs;
+    final current = _consoleWriter;
+    if (current == null) return;
+
+    if (!sessionLogs.consoleEnabled) {
+      logWriter.remove(current);
+      _consoleWriter = null;
+      return;
+    }
+
+    final LogWriter next = switch (sessionLogs.consoleLogFormat) {
+      ConsoleLogFormat.json => JsonStdOutLogWriter(),
+      ConsoleLogFormat.text => current,
+    };
+    if (identical(next, current)) return;
+
+    logWriter.remove(current);
+    logWriter.add(next);
+    _consoleWriter = next;
   }
 
   /// The last created [Serverpod]. In most cases the [Serverpod] is a singleton
@@ -473,10 +505,13 @@ class Serverpod {
     _instance = this;
 
     // Initialize logger early so _writeLifecycleMessage works immediately.
-    // Writer chain starts with TextLogWriter + VmServiceLogWriter.
+    // Writer chain starts with a TextLogWriter + VmServiceLogWriter; the
+    // console writer may be swapped out once config is loaded (json vs
+    // text, or removed when console logging is disabled).
     final textWriter = stdout.hasTerminal
         ? IsolatedLogWriter(TextLogWriter.new)
         : TextLogWriter();
+    _consoleWriter = textWriter;
     logWriter = MultiLogWriter([textWriter, VmServiceLogWriter()]);
     log = Log(logWriter, logLevel: LogLevel.info);
 
@@ -548,6 +583,13 @@ class Serverpod {
     if (this.config.loggingMode == ServerpodLoggingMode.verbose) {
       log.logLevel = LogLevel.debug;
     }
+
+    // Now that config is loaded, reshape the console writer per
+    // config.sessionLogs: text (default), json, or disabled entirely.
+    // The initial TextLogWriter used for pre-config lifecycle output is
+    // swapped out in place so [logWriter]'s identity is preserved for
+    // anything holding a reference.
+    _installConfiguredConsoleWriter();
 
     // If persistent session logging is enabled (and we're not on sqlite,
     // which lacks the log tables), append a DatabaseLogWriter to the chain.
