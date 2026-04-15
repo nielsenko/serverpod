@@ -57,12 +57,14 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     if (id == null) return;
 
     final slowFlag = scope.metadata?[SessionScopeKeys.slow] as bool? ?? false;
+    final numQueries = scope.metadata?[SessionScopeKeys.numQueries] as int?;
     _emit(
       _buildSessionRow(
         scope,
         isOpen: false,
         id: id,
         duration: duration.inMicroseconds / Duration.microsecondsPerSecond,
+        numQueries: numQueries,
         slow: slowFlag,
         error: error?.toString(),
         stackTrace: stackTrace?.toString(),

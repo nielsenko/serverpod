@@ -39,6 +39,13 @@ class SessionLogManager {
   /// chain.
   int _nextEntryOrder = 0;
 
+  /// Total database queries observed for this session, counted
+  /// unconditionally regardless of whether the query is persisted as a
+  /// log entry. Attached to the closing scope so writers record the real
+  /// count (used e.g. to report numQueries on sessions where individual
+  /// query logging was turned off).
+  int _queryCount = 0;
+
   @internal
   SessionLogManager({
     required Session session,
@@ -187,6 +194,11 @@ class SessionLogManager {
     required String? error,
     required StackTrace stackTrace,
   }) async {
+    // Count every query unconditionally; the total is attached to the
+    // closing scope so numQueries on the session row reflects reality
+    // even when individual query entries are filtered out below.
+    _queryCount++;
+
     var executionTime = duration.inMicroseconds / _microNormalizer;
     var logSettings = _settingsForSession(_session);
     var slow = executionTime >= logSettings.slowQueryDuration;
@@ -342,6 +354,7 @@ class SessionLogManager {
           metadata: {
             ...?scope.metadata,
             SessionScopeKeys.slow: isSlow,
+            SessionScopeKeys.numQueries: _queryCount,
             SessionScopeKeys.authenticatedUserId: ?authenticatedUserId,
           },
         );

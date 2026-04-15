@@ -35,6 +35,12 @@ abstract final class SessionScopeKeys {
   /// Whether the session as a whole exceeded the slow-session threshold.
   /// Set late (at session close) since it depends on the final duration.
   static const slow = 'serverpod.slow';
+
+  /// Total number of database queries observed in this session. Counted
+  /// unconditionally by [SessionLogManager] (including queries that are
+  /// not persisted as individual query-log entries), attached to the
+  /// closing scope metadata so writers can record the real count.
+  static const numQueries = 'serverpod.numQueries';
 }
 
 /// Keys set on `LogEntry.metadata` to discriminate log/query/message entries

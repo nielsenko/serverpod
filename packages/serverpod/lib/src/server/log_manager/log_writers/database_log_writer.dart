@@ -192,12 +192,19 @@ class DatabaseLogWriter extends slog.LogWriter {
     }
 
     final slowFlag = scope.metadata?[SessionScopeKeys.slow] as bool? ?? false;
+    // Total query count comes from SessionLogManager via scope metadata
+    // (counted unconditionally there); state.queryCount only tracks the
+    // queries this writer actually persisted, which is wrong when query
+    // logging is turned off.
+    final numQueries =
+        scope.metadata?[SessionScopeKeys.numQueries] as int? ??
+        state.queryCount;
     final row = _buildSessionRow(
       scope,
       isOpen: false,
       id: sessionLogId,
       duration: duration.inMicroseconds / Duration.microsecondsPerSecond,
-      numQueries: state.queryCount,
+      numQueries: numQueries,
       slow: slowFlag,
       error: error?.toString(),
       stackTrace: stackTrace?.toString(),
