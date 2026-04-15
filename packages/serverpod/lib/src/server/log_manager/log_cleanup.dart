@@ -36,7 +36,11 @@ class LogCleanupManager {
 
   Future<void> performCleanup(Session session) async {
     if (!shouldPerformCleanup) return;
-    if (_activeCleanupTask != null) return;
+    final existing = _activeCleanupTask;
+    if (existing != null) {
+      await existing;
+      return;
+    }
 
     _activeCleanupTask = _performCleanup(session)
         .timeout(const Duration(hours: 1))
@@ -53,7 +57,7 @@ class LogCleanupManager {
           _activeCleanupTask = null;
         });
 
-    unawaited(_activeCleanupTask);
+    await _activeCleanupTask;
   }
 
   Future<void> _performCleanup(Session session) async {

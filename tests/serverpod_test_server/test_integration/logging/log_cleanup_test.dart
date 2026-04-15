@@ -91,6 +91,14 @@ void main() {
         test(
           'then a message is printed to stdout with the number of entries deleted.',
           () async {
+            // Cleanup is fire-and-forget from `session.log`, so the
+            // message may not reach stdout until after the setUp
+            // `IOOverrides.runZoned` block has returned. Poll briefly
+            // for it, matching the sibling interval-based test.
+            await Future.doWhile(() async {
+              await Future.delayed(const Duration(milliseconds: 100));
+              return !record.output.contains('Cleaned up');
+            }).timeout(const Duration(seconds: 3));
             expect(
               record.output,
               matches(
@@ -170,6 +178,12 @@ void main() {
         test(
           'then a message is printed to stdout with the number of entries deleted.',
           () async {
+            // Cleanup is fire-and-forget from `session.log`, so poll
+            // for the message to arrive in the captured stdout.
+            await Future.doWhile(() async {
+              await Future.delayed(const Duration(milliseconds: 100));
+              return !record.output.contains('Cleaned up');
+            }).timeout(const Duration(seconds: 3));
             expect(
               record.output,
               matches(

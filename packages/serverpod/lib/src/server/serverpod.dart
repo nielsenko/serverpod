@@ -512,14 +512,25 @@ class Serverpod {
         config: config,
       );
     } on ExitException catch (e) {
-      if (e.message.isNotEmpty) {
-        log.error(e.message);
-      }
-      exit(e.exitCode);
+      _exitAfterFlush(e.exitCode, message: e.message);
     } catch (e, stackTrace) {
       _reportException(e, stackTrace, message: 'Error initializing Serverpod');
-      exit(1);
+      _exitAfterFlush(1);
     }
+  }
+
+  /// Flushes the OS-level stdio buffers (not drained by [exit] on
+  /// non-terminal pipes) and exits.
+  void _exitAfterFlush(int code, {String? message}) {
+    () async {
+      if (message != null && message.isNotEmpty) {
+        log.error(message);
+      }
+      try {
+        await [stdout.flush(), stderr.flush()].wait;
+      } catch (_) {}
+      exit(code);
+    }();
   }
 
   void _initializeServerpod(
@@ -786,10 +797,8 @@ class Serverpod {
 
     void onZoneError(Object error, StackTrace stackTrace) {
       if (error is ExitException) {
-        if (error.message != '') {
-          log.error(error.message);
-        }
-        exit(error.exitCode);
+        _exitAfterFlush(error.exitCode, message: error.message);
+        return;
       }
 
       _exitCode = 1;
@@ -1143,7 +1152,8 @@ class Serverpod {
       _writeLifecycleMessage(
         'SERVERPOD immediate exit, time: ${DateTime.now().toUtc()}',
       );
-      exit(128 + signal.signalNumber);
+      _exitAfterFlush(128 + signal.signalNumber);
+      return;
     }
 
     _interruptSignalSent = true;
@@ -1355,8 +1365,12 @@ class Serverpod {
     );
 
     if (exitProcess) {
-      // For SIGTERM, use exit code 0 for graceful shutdown.
-      // For SIGINT and other signals, use the conventional 128 + signalNumber.
+      // On non-terminals (docker pipes, redirects) stdout is
+      // block-buffered and [exit] does not drain it.
+      await stdout.flush().catchError((_) {});
+      await stderr.flush().catchError((_) {});
+
+      // SIGTERM -> 0 (graceful), SIGINT and others -> 128 + signalNumber.
       final conventionalExitCode = switch (signalNumber) {
         15 => 0, // SIGTERM
         null => 0,

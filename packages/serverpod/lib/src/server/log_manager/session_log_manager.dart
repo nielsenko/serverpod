@@ -306,10 +306,14 @@ class SessionLogManager {
       await work;
     } finally {
       _pendingWrites.remove(work);
-      // Fire-and-forget cleanup check. Runs on every log entry attempt so
-      // the cleanup interval is evaluated regularly, matching the
+      // Fire-and-forget cleanup check. Runs on every log entry attempt
+      // so the cleanup interval is evaluated regularly, matching the
       // pre-revamp behavior; [LogCleanupManager.performCleanup] guards
       // with its own interval check so this is a no-op when not due.
+      // Intentionally unawaited and not tracked: coupling session close
+      // to a background cleanup's completion would risk wedging
+      // shutdown if the cleanup DB query stalls while the pool is
+      // being torn down.
       unawaited(
         _session.serverpod.logCleanupManager?.performCleanup(_session),
       );
@@ -343,6 +347,7 @@ class SessionLogManager {
       // Drain in-flight fire-and-forget writes before closing the scope.
       // Writers like DatabaseLogWriter remove per-scope state on closeScope,
       // so a log still routing through them at that moment would be dropped.
+      //
       if (_pendingWrites.isNotEmpty) {
         await Future.wait(
           _pendingWrites.map((f) => f.catchError((_) {})).toList(),
