@@ -5,43 +5,60 @@ import 'log_types.dart';
 /// Symbol used to store the current [LogScope] in Zone values.
 const Symbol _logScopeKey = #_logScope;
 
+final _stopwatch = Stopwatch()..start();
 int _scopeCounter = 0;
 String _newScopeId(String label) =>
-    '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}_${++_scopeCounter}';
+    '${label.hashCode}_${_stopwatch.elapsedTicks}_${++_scopeCounter}';
+
+/// A factory function that creates a [LogEntry].
+typedef LogEntryFactory = FutureOr<LogEntry> Function();
 
 /// A logger that delegates to a [LogWriter] and resolves the current
 /// [LogScope] from the Zone.
 ///
-/// The core method is [call], which checks the log level before
-/// constructing the [LogEntry]. Convenience methods ([debug], [info],
-/// [warning], [error]) are provided as extensions.
+/// Each call appends onto a rolling `_latest` Future, so writes
+/// serialize in invocation order. [flush] awaits that tail; [close]
+/// does the same and blocks further dispatches.
 ///
-/// Usage:
 /// ```dart
 /// log.info('Server started');
 /// await log.progress('Migration', () async {
-///   log.info('Step 1');  // automatically scoped to Migration
+///   log.info('Step 1');
 /// });
 /// ```
 class Log {
   final LogWriter _writer;
+  Future<void> _latest = Future.value();
+  bool _closed = false;
 
   LogLevel logLevel;
 
   Log(this._writer, {this.logLevel = LogLevel.info});
 
-  /// The current scope from the Zone. Falls back to a synthetic root
-  /// if no scope has been set.
+  /// The current scope from the Zone, or a synthetic root if none.
   LogScope get currentScope =>
       Zone.current[_logScopeKey] as LogScope? ?? _fallbackScope;
 
   static final _fallbackScope = LogScope.root('unknown');
 
-  /// Core logging method. Checks level, then calls the factory and
-  /// passes the entry to the writer.
-  void call(LogLevel level, LogEntry Function() factory) {
-    if (level.index < logLevel.index) return;
-    unawaited(_writer.log(factory()));
+  /// Checks level, evaluates the factory eagerly, and appends the write
+  /// to the chain. Writer errors are swallowed - logging is best-effort.
+  void call(LogLevel level, LogEntryFactory factory) {
+    if (level.index < logLevel.index || _closed) return;
+    _latest = _latest.then((_) async {
+      try {
+        await _writer.log(await factory());
+      } catch (_) {}
+    });
+  }
+
+  /// Awaits in-flight writes without blocking further dispatches.
+  Future<void> flush() => _latest;
+
+  /// Awaits in-flight writes and blocks further dispatches.
+  Future<void> close() async {
+    _closed = true;
+    await flush();
   }
 }
 
@@ -124,7 +141,6 @@ extension LogScoping on Log {
         runner,
         zoneValues: {_logScopeKey: scope},
       );
-      stopwatch.stop();
       await _writer.closeScope(
         scope,
         success: true,
@@ -132,7 +148,6 @@ extension LogScoping on Log {
       );
       return result;
     } catch (e, st) {
-      stopwatch.stop();
       await _writer.closeScope(
         scope,
         success: false,
