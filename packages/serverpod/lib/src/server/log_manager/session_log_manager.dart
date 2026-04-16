@@ -47,6 +47,18 @@ class SessionLogManager {
   /// query logging was turned off).
   int _queryCount = 0;
 
+  /// True when this session is long-lived (a stream) and the runtime
+  /// settings ask us NOT to emit logs continuously. Entries are then
+  /// held in [_bufferedEntries] and flushed from [finalizeLog] when the
+  /// session closes. Matches main's `CachedLogWriter`-wrap semantics -
+  /// evaluated once at construction, not re-checked per call.
+  final bool _bufferStreamingLogs;
+
+  /// Entries accumulated while [_bufferStreamingLogs] is true. Drained
+  /// and written through [_writer] during [finalizeLog], after the scope
+  /// is opened.
+  final List<_BufferedLogEntry> _bufferedEntries = [];
+
   @internal
   SessionLogManager({
     required Session session,
@@ -58,11 +70,26 @@ class SessionLogManager {
        _writer = writer,
        _settingsForSession = settingsForSession,
        _serverId = serverId,
-       _disableSlowSessionLogging = disableSlowSessionLogging {
+       _disableSlowSessionLogging = disableSlowSessionLogging,
+       _bufferStreamingLogs =
+           (session is StreamingSession || session is MethodStreamSession) &&
+           !settingsForSession(session).logStreamingSessionsContinuously {
     _stopwatch.start();
 
-    var settings = _settingsForSession(session);
-    if (settings.logAllSessions) {
+    // Eagerly open the session scope when logAllSessions is on so the
+    // session row is visible in the DB while the session is still running
+    // (matching main's SessionLogManager constructor). Skipped for
+    // InternalSession because the _internalLoggingSession is constructed
+    // by Serverpod() before pod.start() applies migrations - an eager
+    // DB insert there would crash on 'relation serverpod_session_log
+    // does not exist'. Internal sessions still get their row on close
+    // via finalizeLog's ensure-open path.
+    //
+    // Also skipped in buffered streaming mode: the whole point of
+    // buffered mode is to defer every DB write until session close.
+    if (session is! InternalSession &&
+        !_bufferStreamingLogs &&
+        settingsForSession(session).logAllSessions) {
       unawaited(_openScope());
     }
   }
@@ -154,6 +181,20 @@ class SessionLogManager {
       SessionEntryKeys.messageId: ?_session.messageId,
     };
 
+    if (_bufferStreamingLogs) {
+      _bufferedEntries.add(
+        _BufferedLogEntry(
+          time: DateTime.now(),
+          level: newLevel,
+          message: message,
+          error: error,
+          stackTrace: stackTrace,
+          metadata: metadata,
+        ),
+      );
+      return;
+    }
+
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -222,6 +263,20 @@ class SessionLogManager {
       SessionEntryKeys.messageId: ?_session.messageId,
     };
 
+    if (_bufferStreamingLogs) {
+      _bufferedEntries.add(
+        _BufferedLogEntry(
+          time: DateTime.now(),
+          level: LogLevel.debug,
+          message: query,
+          error: error,
+          stackTrace: null,
+          metadata: metadata,
+        ),
+      );
+      return;
+    }
+
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -289,6 +344,20 @@ class SessionLogManager {
       SessionEntryKeys.messageSlow: slow,
     };
 
+    if (_bufferStreamingLogs) {
+      _bufferedEntries.add(
+        _BufferedLogEntry(
+          time: DateTime.now(),
+          level: LogLevel.info,
+          message: '$messageName ($endpointName)',
+          error: error,
+          stackTrace: stackTrace,
+          metadata: metadata,
+        ),
+      );
+      return;
+    }
+
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -348,8 +417,22 @@ class SessionLogManager {
     if (logSettings.logAllSessions ||
         (logSettings.logSlowSessions && isSlow) ||
         (logSettings.logFailedSessions && exception != null) ||
-        _scopeOpened) {
+        _scopeOpened ||
+        _bufferedEntries.isNotEmpty) {
       if (!_scopeOpened) await _openScope();
+
+      // Flush buffered streaming entries now that the scope is open.
+      // Buffered mode (long-lived session + non-continuous logging) deferred
+      // these until close; emit them in the same order they were logged.
+      if (_bufferedEntries.isNotEmpty) {
+        final scope = _scope;
+        if (scope != null) {
+          for (final buffered in _bufferedEntries) {
+            await _writer.log(buffered.build(scope));
+          }
+        }
+        _bufferedEntries.clear();
+      }
 
       // Drain in-flight fire-and-forget writes before closing the scope.
       // Writers like DatabaseLogWriter remove per-scope state on closeScope,
@@ -389,4 +472,36 @@ class SessionLogManager {
       }
     }
   }
+}
+
+/// Holder for an entry that was captured during a long-lived session in
+/// buffered mode. The owning scope isn't known until [SessionLogManager]
+/// flushes the buffer at session close, so we capture everything except
+/// the scope and bind it via [build] at flush time.
+class _BufferedLogEntry {
+  _BufferedLogEntry({
+    required this.time,
+    required this.level,
+    required this.message,
+    required this.error,
+    required this.stackTrace,
+    required this.metadata,
+  });
+
+  final DateTime time;
+  final LogLevel level;
+  final String message;
+  final Object? error;
+  final StackTrace? stackTrace;
+  final Map<String, Object?> metadata;
+
+  LogEntry build(LogScope scope) => LogEntry(
+    time: time,
+    level: level,
+    message: message,
+    scope: scope,
+    error: error,
+    stackTrace: stackTrace,
+    metadata: metadata,
+  );
 }
