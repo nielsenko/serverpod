@@ -239,6 +239,15 @@ void main() {
         test(
           'then the retention count number of entries should be kept.',
           () async {
+            // Cleanup is fire-and-forget from `session.log`, so poll
+            // until the row count drops or times out.
+            await Future.doWhile(() async {
+              final count = await SessionLogEntry.db.count(session);
+              if (count <= retentionCount + 3) return false;
+              await Future.delayed(const Duration(milliseconds: 100));
+              return true;
+            }).timeout(const Duration(seconds: 3));
+
             final allLogs = await SessionLogEntry.db.find(session);
 
             // We can't match the exact number of entries since the cleanup
