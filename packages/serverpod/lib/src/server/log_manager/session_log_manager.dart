@@ -141,11 +141,6 @@ class SessionLogManager {
     if (logLevel.index < logSettings.logLevel.index) return;
 
     final order = ++_nextEntryOrder;
-    if (!_scopeOpened) await _openScope();
-
-    final scope = _scope;
-    if (scope == null) return;
-
     final newLevel = switch (logLevel) {
       proto.LogLevel.debug => LogLevel.debug,
       proto.LogLevel.info => LogLevel.info,
@@ -153,6 +148,16 @@ class SessionLogManager {
       proto.LogLevel.error => LogLevel.error,
       proto.LogLevel.fatal => LogLevel.fatal,
     };
+    final metadata = <String, Object?>{
+      SessionEntryKeys.type: SessionEntryTypeValues.log,
+      SessionEntryKeys.order: order,
+      SessionEntryKeys.messageId: ?_session.messageId,
+    };
+
+    if (!_scopeOpened) await _openScope();
+
+    final scope = _scope;
+    if (scope == null) return;
 
     await _writer.log(
       LogEntry(
@@ -162,10 +167,7 @@ class SessionLogManager {
         scope: scope,
         error: error,
         stackTrace: stackTrace,
-        metadata: {
-          SessionEntryKeys.type: SessionEntryTypeValues.log,
-          SessionEntryKeys.order: order,
-        },
+        metadata: metadata,
       ),
     );
   }
@@ -211,6 +213,15 @@ class SessionLogManager {
     }
 
     final order = ++_nextEntryOrder;
+    final metadata = <String, Object?>{
+      SessionEntryKeys.type: SessionEntryTypeValues.query,
+      SessionEntryKeys.order: order,
+      SessionEntryKeys.queryDuration: executionTime,
+      SessionEntryKeys.queryNumRows: numRowsAffected,
+      SessionEntryKeys.querySlow: slow,
+      SessionEntryKeys.messageId: ?_session.messageId,
+    };
+
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -223,13 +234,7 @@ class SessionLogManager {
         message: query,
         scope: scope,
         error: error,
-        metadata: {
-          SessionEntryKeys.type: SessionEntryTypeValues.query,
-          SessionEntryKeys.order: order,
-          SessionEntryKeys.queryDuration: executionTime,
-          SessionEntryKeys.queryNumRows: numRowsAffected,
-          SessionEntryKeys.querySlow: slow,
-        },
+        metadata: metadata,
       ),
     );
   }
@@ -274,6 +279,16 @@ class SessionLogManager {
     }
 
     final order = ++_nextEntryOrder;
+    final metadata = <String, Object?>{
+      SessionEntryKeys.type: SessionEntryTypeValues.message,
+      SessionEntryKeys.order: order,
+      SessionEntryKeys.messageEndpoint: endpointName,
+      SessionEntryKeys.messageName: messageName,
+      SessionEntryKeys.messageId: messageId,
+      SessionEntryKeys.messageDuration: executionTime,
+      SessionEntryKeys.messageSlow: slow,
+    };
+
     if (!_scopeOpened) await _openScope();
 
     final scope = _scope;
@@ -287,15 +302,7 @@ class SessionLogManager {
         scope: scope,
         error: error,
         stackTrace: stackTrace,
-        metadata: {
-          SessionEntryKeys.type: SessionEntryTypeValues.message,
-          SessionEntryKeys.order: order,
-          SessionEntryKeys.messageEndpoint: endpointName,
-          SessionEntryKeys.messageName: messageName,
-          SessionEntryKeys.messageId: messageId,
-          SessionEntryKeys.messageDuration: executionTime,
-          SessionEntryKeys.messageSlow: slow,
-        },
+        metadata: metadata,
       ),
     );
   }

@@ -56,13 +56,17 @@ class SessionTextStdOutLogWriter extends slog.LogWriter {
     if (logId == null) return;
 
     final type = entry.metadata?[SessionEntryKeys.type] as String?;
+    final messageId = entry.metadata?[SessionEntryKeys.messageId] as int?;
     switch (type) {
       case SessionEntryTypeValues.log:
         _writeFormattedLog(
           'LOG',
           context: entry.level.name.toUpperCase(),
           id: logId,
-          fields: {'message': entry.message},
+          fields: {
+            'messageId': ?messageId,
+            'message': entry.message,
+          },
           error: entry.error?.toString(),
           stackTrace: entry.stackTrace?.toString(),
           toStdErr: _isEntryError(entry),
@@ -75,6 +79,7 @@ class SessionTextStdOutLogWriter extends slog.LogWriter {
           context: null,
           id: logId,
           fields: {
+            'messageId': ?messageId,
             'duration': _printDuration(
               _secondsToDuration(
                 (m[SessionEntryKeys.queryDuration] as num?)?.toDouble(),

@@ -144,9 +144,11 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     int sessionLogId,
     int order,
   ) {
+    final m = entry.metadata ?? const {};
     return proto.LogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
+      messageId: m[SessionEntryKeys.messageId] as int?,
       time: entry.time,
       logLevel: _toProtoLogLevel(entry.level),
       message: entry.message,
@@ -165,6 +167,7 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     return proto.QueryLogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
+      messageId: m[SessionEntryKeys.messageId] as int?,
       query: entry.message,
       duration: (m[SessionEntryKeys.queryDuration] as num?)?.toDouble() ?? 0.0,
       numRows: m[SessionEntryKeys.queryNumRows] as int?,
