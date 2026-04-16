@@ -31,6 +31,9 @@ void main() {
           await IOOverrides.runZoned(
             () async {
               await sessionBuilder.build().close(error: TestError());
+              // Error goes through Serverpod.log on the _logManager ==
+              // null path; flush to ensure it lands before asserting.
+              await Serverpod.instance.log.flush();
             },
             stdout: () => record,
           );
@@ -48,6 +51,7 @@ void main() {
                 error: TestError(),
                 stackTrace: StackTrace.fromString('TestStackTrace'),
               );
+              await Serverpod.instance.log.flush();
             },
             stdout: () => record,
           );

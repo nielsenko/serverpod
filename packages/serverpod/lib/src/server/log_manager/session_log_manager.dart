@@ -10,12 +10,13 @@ import 'session_log_keys.dart';
 
 const double _microNormalizer = 1000 * 1000;
 
-/// Manages logging for a single session using the new [LogWriter] chain.
+/// Per-session dispatcher for the [LogWriter] chain.
 ///
-/// Opens a scope when logging starts, routes entries through the writer
-/// chain (which includes VmServiceLogWriter and TextLogWriter; a
-/// DatabaseLogWriter is still TODO), and closes the scope when the session
-/// ends.
+/// Each call is appended onto a rolling `_latest` Future via `.then`,
+/// giving serialized writes in invocation order and a one-pointer drain
+/// at [finalizeLog]. Long-lived streams with
+/// `logStreamingSessionsContinuously: false` buffer entries in memory
+/// and flush through the same chain at finalize.
 @internal
 class SessionLogManager {
   final Session _session;
@@ -24,40 +25,29 @@ class SessionLogManager {
   final bool _disableSlowSessionLogging;
   final String _serverId;
 
-  LogScope? _scope;
+  late final LogScope _scope;
+
+  Future<void> _latest = Future.value();
+  bool _closed = false;
+
+  bool _writerScopeOpened = false;
+  bool _hasBufferedEvents = false;
+  final List<LogEntry> _buffered = [];
+
   final Stopwatch _stopwatch = Stopwatch();
-  bool _scopeOpened = false;
 
-  /// Fire-and-forget log/query/message writes tracked so [finalizeLog] can
-  /// drain them before closing the scope. Without this, a writer's close
-  /// path can tear down per-scope state while an in-flight entry is still
-  /// on its way to it, silently dropping the entry.
-  final Set<Future<void>> _pendingWrites = {};
-
-  /// Monotonic per-session counter assigned to each log/query/message
-  /// entry at *call* time (not at DB insert time) so the persisted order
-  /// reflects caller order even when entries race through the writer
-  /// chain.
+  /// Monotonic per-session counter, assigned at call time so persisted
+  /// order reflects caller order even when writes race downstream.
   int _nextEntryOrder = 0;
 
-  /// Total database queries observed for this session, counted
-  /// unconditionally regardless of whether the query is persisted as a
-  /// log entry. Attached to the closing scope so writers record the real
-  /// count (used e.g. to report numQueries on sessions where individual
-  /// query logging was turned off).
+  /// Total queries observed, counted before the filter so numQueries on
+  /// the session row reflects reality when individual query logging is
+  /// off.
   int _queryCount = 0;
 
-  /// True when this session is long-lived (a stream) and the runtime
-  /// settings ask us NOT to emit logs continuously. Entries are then
-  /// held in [_bufferedEntries] and flushed from [finalizeLog] when the
-  /// session closes. Matches main's `CachedLogWriter`-wrap semantics -
-  /// evaluated once at construction, not re-checked per call.
+  /// Long-lived streaming session with continuous logging off: defer
+  /// every write to session close. Evaluated once at construction.
   final bool _bufferStreamingLogs;
-
-  /// Entries accumulated while [_bufferStreamingLogs] is true. Drained
-  /// and written through [_writer] during [finalizeLog], after the scope
-  /// is opened.
-  final List<_BufferedLogEntry> _bufferedEntries = [];
 
   @internal
   SessionLogManager({
@@ -74,23 +64,31 @@ class SessionLogManager {
        _bufferStreamingLogs =
            (session is StreamingSession || session is MethodStreamSession) &&
            !settingsForSession(session).logStreamingSessionsContinuously {
+    _scope = LogScope(
+      id: '${session.sessionId.hashCode}',
+      label: _buildLabel(),
+      startTime: session.startTime,
+      metadata: {
+        SessionScopeKeys.sessionType: _sessionTypeValue(),
+        SessionScopeKeys.sessionId: session.sessionId.toString(),
+        SessionScopeKeys.endpoint: session.endpoint,
+        SessionScopeKeys.method: session.method,
+        SessionScopeKeys.serverId: _serverId,
+        if (session is FutureCallSession)
+          SessionScopeKeys.futureCallName: session.futureCallName,
+      },
+    );
+
     _stopwatch.start();
 
-    // Eagerly open the session scope when logAllSessions is on so the
-    // session row is visible in the DB while the session is still running
-    // (matching main's SessionLogManager constructor). Skipped for
-    // InternalSession because the _internalLoggingSession is constructed
-    // by Serverpod() before pod.start() applies migrations - an eager
-    // DB insert there would crash on 'relation serverpod_session_log
-    // does not exist'. Internal sessions still get their row on close
-    // via finalizeLog's ensure-open path.
-    //
-    // Also skipped in buffered streaming mode: the whole point of
-    // buffered mode is to defer every DB write until session close.
+    // Skipped for InternalSession: _internalLoggingSession is built
+    // before pod.start applies migrations, and an eager INSERT would
+    // crash on the missing serverpod_session_log table. Internal
+    // sessions still get their row via finalizeLog's ensure-open path.
     if (session is! InternalSession &&
         !_bufferStreamingLogs &&
         settingsForSession(session).logAllSessions) {
-      unawaited(_openScope());
+      unawaited(_ensureWriterScopeOpened());
     }
   }
 
@@ -119,133 +117,99 @@ class SessionLogManager {
     _ => SessionTypeValues.unknown,
   };
 
-  Future<void> _openScope() async {
-    if (_scopeOpened) return;
-    _scopeOpened = true;
+  Future<void> _ensureWriterScopeOpened() async {
+    if (_writerScopeOpened) return;
+    _writerScopeOpened = true;
+    await _writer.openScope(_scope);
+  }
 
-    final session = _session;
-    _scope = LogScope(
-      id: '${session.sessionId.hashCode}',
-      label: _buildLabel(),
-      startTime: session.startTime,
-      metadata: {
-        SessionScopeKeys.sessionType: _sessionTypeValue(),
-        SessionScopeKeys.sessionId: session.sessionId.toString(),
-        SessionScopeKeys.endpoint: session.endpoint,
-        SessionScopeKeys.method: session.method,
-        SessionScopeKeys.serverId: _serverId,
-        if (session is FutureCallSession)
-          SessionScopeKeys.futureCallName: session.futureCallName,
-      },
+  LogLevel _toSlogLevel(proto.LogLevel level) => switch (level) {
+    proto.LogLevel.debug => LogLevel.debug,
+    proto.LogLevel.info => LogLevel.info,
+    proto.LogLevel.warning => LogLevel.warning,
+    proto.LogLevel.error => LogLevel.error,
+    proto.LogLevel.fatal => LogLevel.fatal,
+  };
+
+  void _dispatch(LogEntry entry) {
+    if (_closed) return;
+    if (_bufferStreamingLogs) {
+      _buffered.add(entry);
+      _hasBufferedEvents = true;
+      return;
+    }
+    _enqueueWrite(entry);
+  }
+
+  void _enqueueWrite(LogEntry entry) {
+    _latest = _latest.then((_) async {
+      try {
+        await _ensureWriterScopeOpened();
+        await _writer.log(entry);
+      } catch (_) {
+        // Writer errors (e.g. DB pool closing during shutdown) are
+        // expected; swallow so they don't surface as unhandled async
+        // errors and the chain stays healthy.
+      }
+    });
+  }
+
+  /// Unawaited so shutdown isn't wedged if the cleanup DB query stalls
+  /// while the pool is being torn down. [LogCleanupManager.performCleanup]
+  /// guards with its own interval check, so this is a no-op when not due.
+  void _triggerCleanup() {
+    unawaited(
+      _session.serverpod.logCleanupManager?.performCleanup(_session),
     );
-    await _writer.openScope(_scope!);
   }
 
   /// Logs an entry within this session.
   @internal
-  Future<void> logEntry({
+  void logEntry({
     proto.LogLevel? level,
     required String message,
     String? error,
     StackTrace? stackTrace,
-  }) => _track(
-    _logEntry(
-      level: level,
-      message: message,
-      error: error,
-      stackTrace: stackTrace,
-    ),
-  );
+  }) {
+    _triggerCleanup();
 
-  Future<void> _logEntry({
-    proto.LogLevel? level,
-    required String message,
-    String? error,
-    StackTrace? stackTrace,
-  }) async {
     final logLevel = level ?? proto.LogLevel.info;
-    var logSettings = _settingsForSession(_session);
+    final logSettings = _settingsForSession(_session);
     if (logLevel.index < logSettings.logLevel.index) return;
 
     final order = ++_nextEntryOrder;
-    final newLevel = switch (logLevel) {
-      proto.LogLevel.debug => LogLevel.debug,
-      proto.LogLevel.info => LogLevel.info,
-      proto.LogLevel.warning => LogLevel.warning,
-      proto.LogLevel.error => LogLevel.error,
-      proto.LogLevel.fatal => LogLevel.fatal,
-    };
-    final metadata = <String, Object?>{
-      SessionEntryKeys.type: SessionEntryTypeValues.log,
-      SessionEntryKeys.order: order,
-      SessionEntryKeys.messageId: ?_session.messageId,
-    };
-
-    if (_bufferStreamingLogs) {
-      _bufferedEntries.add(
-        _BufferedLogEntry(
-          time: DateTime.now(),
-          level: newLevel,
-          message: message,
-          error: error,
-          stackTrace: stackTrace,
-          metadata: metadata,
-        ),
-      );
-      return;
-    }
-
-    if (!_scopeOpened) await _openScope();
-
-    final scope = _scope;
-    if (scope == null) return;
-
-    await _writer.log(
+    _dispatch(
       LogEntry(
         time: DateTime.now(),
-        level: newLevel,
+        level: _toSlogLevel(logLevel),
         message: message,
-        scope: scope,
+        scope: _scope,
         error: error,
         stackTrace: stackTrace,
-        metadata: metadata,
+        metadata: {
+          SessionEntryKeys.type: SessionEntryTypeValues.log,
+          SessionEntryKeys.order: order,
+          SessionEntryKeys.messageId: ?_session.messageId,
+        },
       ),
     );
   }
 
   /// Logs a database query within this session.
   @internal
-  Future<void> logQuery({
+  void logQuery({
     required String query,
     required Duration duration,
     required int? numRowsAffected,
     required String? error,
     required StackTrace stackTrace,
-  }) => _track(
-    _logQuery(
-      query: query,
-      duration: duration,
-      numRowsAffected: numRowsAffected,
-      error: error,
-      stackTrace: stackTrace,
-    ),
-  );
-
-  Future<void> _logQuery({
-    required String query,
-    required Duration duration,
-    required int? numRowsAffected,
-    required String? error,
-    required StackTrace stackTrace,
-  }) async {
-    // Count every query unconditionally; the total is attached to the
-    // closing scope so numQueries on the session row reflects reality
-    // even when individual query entries are filtered out below.
+  }) {
+    _triggerCleanup();
     _queryCount++;
 
-    var executionTime = duration.inMicroseconds / _microNormalizer;
-    var logSettings = _settingsForSession(_session);
-    var slow = executionTime >= logSettings.slowQueryDuration;
+    final executionTime = duration.inMicroseconds / _microNormalizer;
+    final logSettings = _settingsForSession(_session);
+    final slow = executionTime >= logSettings.slowQueryDuration;
 
     if (!logSettings.logAllQueries &&
         !(logSettings.logSlowQueries && slow) &&
@@ -254,79 +218,41 @@ class SessionLogManager {
     }
 
     final order = ++_nextEntryOrder;
-    final metadata = <String, Object?>{
-      SessionEntryKeys.type: SessionEntryTypeValues.query,
-      SessionEntryKeys.order: order,
-      SessionEntryKeys.queryDuration: executionTime,
-      SessionEntryKeys.queryNumRows: numRowsAffected,
-      SessionEntryKeys.querySlow: slow,
-      SessionEntryKeys.messageId: ?_session.messageId,
-    };
-
-    if (_bufferStreamingLogs) {
-      _bufferedEntries.add(
-        _BufferedLogEntry(
-          time: DateTime.now(),
-          level: LogLevel.debug,
-          message: query,
-          error: error,
-          stackTrace: null,
-          metadata: metadata,
-        ),
-      );
-      return;
-    }
-
-    if (!_scopeOpened) await _openScope();
-
-    final scope = _scope;
-    if (scope == null) return;
-
-    await _writer.log(
+    _dispatch(
       LogEntry(
         time: DateTime.now(),
         level: LogLevel.debug,
         message: query,
-        scope: scope,
+        scope: _scope,
         error: error,
-        metadata: metadata,
+        metadata: {
+          SessionEntryKeys.type: SessionEntryTypeValues.query,
+          SessionEntryKeys.order: order,
+          SessionEntryKeys.queryDuration: executionTime,
+          SessionEntryKeys.queryNumRows: numRowsAffected,
+          SessionEntryKeys.querySlow: slow,
+          SessionEntryKeys.messageId: ?_session.messageId,
+        },
       ),
     );
   }
 
   /// Logs a streaming message within this session.
   @internal
-  Future<void> logMessage({
+  void logMessage({
     required String endpointName,
     required String messageName,
     required int messageId,
     required Duration duration,
     required String? error,
     required StackTrace? stackTrace,
-  }) => _track(
-    _logMessage(
-      endpointName: endpointName,
-      messageName: messageName,
-      messageId: messageId,
-      duration: duration,
-      error: error,
-      stackTrace: stackTrace,
-    ),
-  );
+  }) {
+    _triggerCleanup();
 
-  Future<void> _logMessage({
-    required String endpointName,
-    required String messageName,
-    required int messageId,
-    required Duration duration,
-    required String? error,
-    required StackTrace? stackTrace,
-  }) async {
-    var executionTime = duration.inMicroseconds / _microNormalizer;
-    var slow =
-        executionTime >= _settingsForSession(_session).slowSessionDuration;
+    final executionTime = duration.inMicroseconds / _microNormalizer;
+    final logSettings = _settingsForSession(_session);
+    final slow = executionTime >= logSettings.slowSessionDuration;
 
-    var logSettings = _settingsForSession(_session);
     if (!logSettings.logAllSessions &&
         !(logSettings.logSlowSessions && slow) &&
         !(logSettings.logFailedSessions && error != null)) {
@@ -334,67 +260,30 @@ class SessionLogManager {
     }
 
     final order = ++_nextEntryOrder;
-    final metadata = <String, Object?>{
-      SessionEntryKeys.type: SessionEntryTypeValues.message,
-      SessionEntryKeys.order: order,
-      SessionEntryKeys.messageEndpoint: endpointName,
-      SessionEntryKeys.messageName: messageName,
-      SessionEntryKeys.messageId: messageId,
-      SessionEntryKeys.messageDuration: executionTime,
-      SessionEntryKeys.messageSlow: slow,
-    };
-
-    if (_bufferStreamingLogs) {
-      _bufferedEntries.add(
-        _BufferedLogEntry(
-          time: DateTime.now(),
-          level: LogLevel.info,
-          message: '$messageName ($endpointName)',
-          error: error,
-          stackTrace: stackTrace,
-          metadata: metadata,
-        ),
-      );
-      return;
-    }
-
-    if (!_scopeOpened) await _openScope();
-
-    final scope = _scope;
-    if (scope == null) return;
-
-    await _writer.log(
+    _dispatch(
       LogEntry(
         time: DateTime.now(),
         level: LogLevel.info,
         message: '$messageName ($endpointName)',
-        scope: scope,
+        scope: _scope,
         error: error,
         stackTrace: stackTrace,
-        metadata: metadata,
+        metadata: {
+          SessionEntryKeys.type: SessionEntryTypeValues.message,
+          SessionEntryKeys.order: order,
+          SessionEntryKeys.messageEndpoint: endpointName,
+          SessionEntryKeys.messageName: messageName,
+          SessionEntryKeys.messageId: messageId,
+          SessionEntryKeys.messageDuration: executionTime,
+          SessionEntryKeys.messageSlow: slow,
+        },
       ),
     );
   }
 
-  Future<void> _track(Future<void> work) async {
-    _pendingWrites.add(work);
-    try {
-      await work;
-    } finally {
-      _pendingWrites.remove(work);
-      // Fire-and-forget cleanup check. Runs on every log entry attempt
-      // so the cleanup interval is evaluated regularly, matching the
-      // pre-revamp behavior; [LogCleanupManager.performCleanup] guards
-      // with its own interval check so this is a no-op when not due.
-      // Intentionally unawaited and not tracked: coupling session close
-      // to a background cleanup's completion would risk wedging
-      // shutdown if the cleanup DB query stalls while the pool is
-      // being torn down.
-      unawaited(
-        _session.serverpod.logCleanupManager?.performCleanup(_session),
-      );
-    }
-  }
+  /// Drains any in-flight writes without closing the session.
+  @internal
+  Future<void> flush() => _latest;
 
   /// Finalizes the session log. Called when the session closes.
   @internal
@@ -405,103 +294,58 @@ class SessionLogManager {
     StackTrace? stackTrace,
   }) async {
     _stopwatch.stop();
-    var duration = session.duration;
-    var logSettings = _settingsForSession(session);
+    final duration = session.duration;
+    final logSettings = _settingsForSession(session);
 
-    var slowMicros = (logSettings.slowSessionDuration * _microNormalizer)
+    final slowMicros = (logSettings.slowSessionDuration * _microNormalizer)
         .toInt();
-    var isSlow =
+    final isSlow =
         duration > Duration(microseconds: slowMicros) &&
         !_disableSlowSessionLogging;
 
-    if (logSettings.logAllSessions ||
+    final shouldEmit =
+        logSettings.logAllSessions ||
         (logSettings.logSlowSessions && isSlow) ||
         (logSettings.logFailedSessions && exception != null) ||
-        _scopeOpened ||
-        _bufferedEntries.isNotEmpty) {
-      if (!_scopeOpened) await _openScope();
+        _writerScopeOpened ||
+        _hasBufferedEvents;
 
-      // Flush buffered streaming entries now that the scope is open.
-      // Buffered mode (long-lived session + non-continuous logging) deferred
-      // these until close; emit them in the same order they were logged.
-      if (_bufferedEntries.isNotEmpty) {
-        final scope = _scope;
-        if (scope != null) {
-          for (final buffered in _bufferedEntries) {
-            await _writer.log(buffered.build(scope));
-          }
-        }
-        _bufferedEntries.clear();
-      }
+    if (shouldEmit) {
+      try {
+        await _ensureWriterScopeOpened();
+      } catch (_) {}
 
-      // Drain in-flight fire-and-forget writes before closing the scope.
-      // Writers like DatabaseLogWriter remove per-scope state on closeScope,
-      // so a log still routing through them at that moment would be dropped.
-      //
-      if (_pendingWrites.isNotEmpty) {
-        await Future.wait(
-          _pendingWrites.map((f) => f.catchError((_) {})).toList(),
-        );
+      for (final entry in _buffered) {
+        _enqueueWrite(entry);
       }
-
-      final scope = _scope;
-      if (scope != null) {
-        // Build a close-time scope copy with late-set metadata (slow flag,
-        // authenticated user id). Same id so stateful writers can look up
-        // their per-scope record; fresh metadata carries the final state.
-        final closeScope = LogScope(
-          id: scope.id,
-          label: scope.label,
-          startTime: scope.startTime,
-          parent: scope.parent,
-          metadata: {
-            ...?scope.metadata,
-            SessionScopeKeys.slow: isSlow,
-            SessionScopeKeys.numQueries: _queryCount,
-            SessionScopeKeys.authenticatedUserId: ?authenticatedUserId,
-          },
-        );
-        await _writer.closeScope(
-          closeScope,
-          success: exception == null,
-          duration: _stopwatch.elapsed,
-          error: exception != null ? Exception(exception) : null,
-          stackTrace: stackTrace,
-        );
-        _scope = null;
-      }
+      _buffered.clear();
     }
+
+    _closed = true;
+    await _latest;
+
+    if (!shouldEmit) return;
+
+    // Fresh scope with the same id so stateful writers look up the same
+    // per-scope record; metadata carries close-time fields.
+    final closeScope = LogScope(
+      id: _scope.id,
+      label: _scope.label,
+      startTime: _scope.startTime,
+      parent: _scope.parent,
+      metadata: {
+        ...?_scope.metadata,
+        SessionScopeKeys.slow: isSlow,
+        SessionScopeKeys.numQueries: _queryCount,
+        SessionScopeKeys.authenticatedUserId: ?authenticatedUserId,
+      },
+    );
+    await _writer.closeScope(
+      closeScope,
+      success: exception == null,
+      duration: _stopwatch.elapsed,
+      error: exception != null ? Exception(exception) : null,
+      stackTrace: stackTrace,
+    );
   }
-}
-
-/// Holder for an entry that was captured during a long-lived session in
-/// buffered mode. The owning scope isn't known until [SessionLogManager]
-/// flushes the buffer at session close, so we capture everything except
-/// the scope and bind it via [build] at flush time.
-class _BufferedLogEntry {
-  _BufferedLogEntry({
-    required this.time,
-    required this.level,
-    required this.message,
-    required this.error,
-    required this.stackTrace,
-    required this.metadata,
-  });
-
-  final DateTime time;
-  final LogLevel level;
-  final String message;
-  final Object? error;
-  final StackTrace? stackTrace;
-  final Map<String, Object?> metadata;
-
-  LogEntry build(LogScope scope) => LogEntry(
-    time: time,
-    level: level,
-    message: message,
-    scope: scope,
-    error: error,
-    stackTrace: stackTrace,
-    metadata: metadata,
-  );
 }

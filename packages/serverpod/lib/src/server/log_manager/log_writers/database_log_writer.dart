@@ -97,6 +97,12 @@ class DatabaseLogWriter extends slog.LogWriter {
       state.sessionLogId.complete(id);
     } catch (e, st) {
       state.sessionLogId.completeError(e, st);
+      // Pre-attach a no-op handler so the rejection isn't flagged as
+      // an unhandled async error before [_log]/[_closeScope] get a
+      // chance to await. `ignore()` doesn't consume the error -
+      // subsequent awaits still see it - but it satisfies Dart's
+      // "was a handler attached?" check at microtask time.
+      state.sessionLogId.future.ignore();
     }
   }
 
