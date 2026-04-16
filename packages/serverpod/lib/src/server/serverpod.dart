@@ -1522,7 +1522,6 @@ Future<void>? _shutdownTestAuditor() {
     return null;
   }
   return Future(() {
-    Serverpod.instance.log.warning('serverpod shutdown test auditor enabled');
     if (testThrowerDelaySeconds == 0) {
       throw Exception('serverpod shutdown test auditor throwing');
     } else {
