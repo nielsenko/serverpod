@@ -3,27 +3,11 @@ import 'dart:async';
 import 'log_types.dart';
 
 /// Symbol used to store the current [LogScope] in Zone values.
-const Symbol logScopeKey = #_logScope;
+const Symbol _logScopeKey = #_logScope;
 
 int _scopeCounter = 0;
 String _newScopeId(String label) =>
     '${label.hashCode}_${DateTime.now().millisecondsSinceEpoch}_${++_scopeCounter}';
-
-/// Runs [body] with [rootScope] installed in the Zone.
-Future<T> runWithRootScope<T>({
-  required LogScope rootScope,
-  required FutureOr<T> Function() body,
-}) async {
-  return runZoned(body, zoneValues: {logScopeKey: rootScope});
-}
-
-/// Runs [body] inside a child scope.
-Future<T> runInScope<T>({
-  required LogScope scope,
-  required FutureOr<T> Function() body,
-}) async {
-  return runZoned(body, zoneValues: {logScopeKey: scope});
-}
 
 /// A logger that delegates to a [LogWriter] and resolves the current
 /// [LogScope] from the Zone.
@@ -49,7 +33,7 @@ class Log {
   /// The current scope from the Zone. Falls back to a synthetic root
   /// if no scope has been set.
   LogScope get currentScope =>
-      Zone.current[logScopeKey] as LogScope? ?? _fallbackScope;
+      Zone.current[_logScopeKey] as LogScope? ?? _fallbackScope;
 
   static final _fallbackScope = LogScope.root('unknown');
 
@@ -138,7 +122,7 @@ extension LogScoping on Log {
     try {
       final result = await runZoned(
         runner,
-        zoneValues: {logScopeKey: scope},
+        zoneValues: {_logScopeKey: scope},
       );
       stopwatch.stop();
       await _writer.closeScope(
@@ -158,53 +142,5 @@ extension LogScoping on Log {
       );
       rethrow;
     }
-  }
-
-  /// Opens a child scope manually. The caller is responsible for closing
-  /// it. Prefer [progress] when possible.
-  ///
-  /// Returns a [ScopedLog] that logs to the child scope and must be
-  /// closed when done.
-  ScopedLog openScope(
-    String label, {
-    Map<String, Object?>? metadata,
-  }) {
-    final scope = currentScope.child(
-      id: _newScopeId(label),
-      label: label,
-      metadata: metadata,
-    );
-    _writer.openScope(scope);
-    return ScopedLog._(_writer, scope, logLevel);
-  }
-}
-
-/// A logger bound to a specific scope. Created by [LogScoping.openScope].
-/// Must be [close]d when done.
-class ScopedLog extends Log {
-  final LogScope _scope;
-  final Stopwatch _stopwatch;
-
-  ScopedLog._(LogWriter writer, this._scope, LogLevel level)
-    : _stopwatch = Stopwatch()..start(),
-      super(writer, logLevel: level);
-
-  @override
-  LogScope get currentScope => _scope;
-
-  /// Closes this scope.
-  Future<void> close({
-    required bool success,
-    Object? error,
-    StackTrace? stackTrace,
-  }) async {
-    _stopwatch.stop();
-    await _writer.closeScope(
-      _scope,
-      success: success,
-      duration: _stopwatch.elapsed,
-      error: error,
-      stackTrace: stackTrace,
-    );
   }
 }
