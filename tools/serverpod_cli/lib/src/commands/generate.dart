@@ -9,8 +9,8 @@ import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/start/file_watcher.dart';
 import 'package:serverpod_cli/src/generated/version.dart';
+import 'package:serverpod_cli/src/generator/analyzers.dart';
 import 'package:serverpod_cli/src/generator/generation_staleness.dart';
-import 'package:serverpod_cli/src/generator/generator.dart';
 import 'package:serverpod_cli/src/runner/serverpod_command.dart';
 import 'package:serverpod_cli/src/runner/serverpod_command_runner.dart';
 import 'package:serverpod_cli/src/serverpod_packages_version_check/serverpod_packages_version_check.dart';
@@ -213,9 +213,8 @@ Future<GenerateResult> analyzeAndGenerate({
   }
   late final GenerateResult result;
   await log.progress('Generating code', () async {
-    result = await performGenerate(
+    result = await analyzers.performGenerate(
       config: config,
-      analyzers: analyzers,
       requirements: requirements,
       affectedPaths: skipStalenessCheck ? affectedPaths : null,
     );

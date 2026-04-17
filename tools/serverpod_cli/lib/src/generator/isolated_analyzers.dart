@@ -89,21 +89,6 @@ final class IsolatedAnalyzers extends IsolatedObject<Analyzers>
   }
 
   @override
-  Future<void> close() async {
-    _logPort.close();
-    await super.close();
-  }
-
-  // These are not accessible on the isolated proxy - the real instances
-  // live on the worker isolate.
-  @override
-  Never get endpoints => throw UnsupportedError('Use analyzeAndGenerate()');
-  @override
-  Never get models => throw UnsupportedError('Use analyzeAndGenerate()');
-  @override
-  Never get futureCalls => throw UnsupportedError('Use analyzeAndGenerate()');
-
-  @override
   Future<bool> update({
     required GeneratorConfig config,
     required Set<String> affectedPaths,
@@ -116,6 +101,29 @@ final class IsolatedAnalyzers extends IsolatedObject<Analyzers>
         requirements: requirements,
       ),
     );
+  }
+
+  @override
+  Future<GenerateResult> performGenerate({
+    bool dartFormat = true,
+    required GeneratorConfig config,
+    GenerationRequirements requirements = GenerationRequirements.full,
+    Set<String>? affectedPaths,
+  }) {
+    return evaluate(
+      (analyzers) => analyzers.performGenerate(
+        dartFormat: dartFormat,
+        config: config,
+        requirements: requirements,
+        affectedPaths: affectedPaths,
+      ),
+    );
+  }
+
+  @override
+  Future<void> close() async {
+    _logPort.close();
+    await super.close();
   }
 }
 
