@@ -512,21 +512,29 @@ class Serverpod {
         config: config,
       );
     } on ExitException catch (e) {
-      _exitAfterFlush(e.exitCode, message: e.message);
+      // Construction failed - the object is half-initialized so we
+      // can't let control return to the caller. Emit the message
+      // synchronously and exit before any async drain could return.
+      if (e.message.isNotEmpty) {
+        stderr.writeln(e.message);
+      }
+      exit(e.exitCode);
     } catch (e, stackTrace) {
-      _reportException(e, stackTrace, message: 'Error initializing Serverpod');
-      _exitAfterFlush(1);
+      stderr.writeln('Error initializing Serverpod: $e');
+      stderr.writeln(stackTrace);
+      exit(1);
     }
   }
 
-  /// Flushes the OS-level stdio buffers (not drained by [exit] on
-  /// non-terminal pipes) and exits.
+  /// Drains the framework log chain and flushes the OS-level stdio
+  /// buffers (not drained by [exit] on non-terminal pipes), then exits.
   void _exitAfterFlush(int code, {String? message}) {
     () async {
       if (message != null && message.isNotEmpty) {
         log.error(message);
       }
       try {
+        await log.close();
         await [stdout.flush(), stderr.flush()].wait;
       } catch (_) {}
       exit(code);
@@ -1365,8 +1373,10 @@ class Serverpod {
     );
 
     if (exitProcess) {
+      // Drain log chain, then the OS-level stdout/stderr buffers.
       // On non-terminals (docker pipes, redirects) stdout is
       // block-buffered and [exit] does not drain it.
+      await log.close();
       await stdout.flush().catchError((_) {});
       await stderr.flush().catchError((_) {});
 
