@@ -124,10 +124,17 @@ extension LogScoping on Log {
   /// before the runner and closed after it completes (or fails).
   ///
   /// Log calls inside the runner are automatically scoped via the Zone.
+  ///
+  /// Success signal:
+  /// - If [runner] throws, the scope closes with `success: false`.
+  /// - Else if [isSuccess] is provided, its return value is used.
+  /// - Else if [T] is `bool`, the returned value is used directly.
+  /// - Otherwise, the scope closes with `success: true`.
   Future<T> progress<T>(
     String label,
     FutureOr<T> Function() runner, {
     Map<String, Object?>? metadata,
+    bool Function(T result)? isSuccess,
   }) async {
     final scope = currentScope.child(
       id: _newScopeId(label),
@@ -143,7 +150,7 @@ extension LogScoping on Log {
       );
       await _writer.closeScope(
         scope,
-        success: true,
+        success: isSuccess?.call(result) ?? (result is bool ? result : true),
         duration: stopwatch.elapsed,
       );
       return result;
