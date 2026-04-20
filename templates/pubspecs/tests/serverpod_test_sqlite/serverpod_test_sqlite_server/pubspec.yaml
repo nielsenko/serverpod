@@ -17,7 +17,6 @@ dependencies:
 dev_dependencies:
   serverpod_cli: SERVERPOD_VERSION
   serverpod_lints: SERVERPOD_VERSION
-  serverpod_log: SERVERPOD_VERSION
   serverpod_test: SERVERPOD_VERSION
   serverpod_test_client:
     path: ../../serverpod_test_client
@@ -46,8 +45,6 @@ dependency_overrides:
     path: ../../../packages/serverpod_database
   serverpod_lints:
     path: ../../../packages/serverpod_lints
-  serverpod_log:
-    path: ../../../packages/serverpod_log
   serverpod_serialization:
     path: ../../../packages/serverpod_serialization
   serverpod_service_client:

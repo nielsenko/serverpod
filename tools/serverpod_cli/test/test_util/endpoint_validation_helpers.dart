@@ -56,8 +56,6 @@ dependency_overrides:
     path: $pathToServerpodRoot/packages/serverpod_client
   serverpod_database:
     path: $pathToServerpodRoot/packages/serverpod_database
-  serverpod_log:
-    path: $pathToServerpodRoot/packages/serverpod_log
 ''');
 
   final result = await Process.run(

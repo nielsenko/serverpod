@@ -14,7 +14,6 @@ dependencies:
   meta: ^1.15.0
   serverpod_client: SERVERPOD_VERSION
   serverpod_database: SERVERPOD_VERSION
-  serverpod_log: SERVERPOD_VERSION
   serverpod_shared: SERVERPOD_VERSION
 
 dev_dependencies:
@@ -27,8 +26,6 @@ dependency_overrides:
     path: ../serverpod_database
   serverpod_lints:
     path: ../serverpod_lints
-  serverpod_log: 
-    path: ../serverpod_log
   serverpod_serialization:
     path: ../serverpod_serialization
   serverpod_shared:

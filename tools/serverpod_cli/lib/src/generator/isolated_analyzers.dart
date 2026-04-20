@@ -7,7 +7,7 @@ import 'package:serverpod_cli/src/commands/generate.dart'
     show GenerationRequirements;
 import 'package:serverpod_cli/src/generator/analyzers.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
-import 'package:serverpod_log/serverpod_log.dart' show IsolatedObject;
+import 'package:serverpod_shared/serverpod_shared.dart' show IsolatedObject;
 
 import '../commands/generate.dart';
 

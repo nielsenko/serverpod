@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_log/serverpod_log.dart' as slog;
+import 'package:serverpod_shared/serverpod_shared.dart' as slog;
 
 import '../session_log_keys.dart';
 

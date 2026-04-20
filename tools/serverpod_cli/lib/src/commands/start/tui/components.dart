@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:intl/intl.dart';
 import 'package:nocterm/nocterm.dart' hide LogEntry;
-import 'package:serverpod_log/serverpod_log.dart';
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 import 'format_duration.dart';
 import 'serverpod_theme.dart';

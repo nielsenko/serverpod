@@ -23,8 +23,6 @@ dependency_overrides:
     path: ../../../../modules/legacy/serverpod_chat/serverpod_chat_server
   serverpod_database:
     path: ../../../../packages/serverpod_database
-  serverpod_log: 
-    path: ../../../../packages/serverpod_log
   serverpod_serialization:
     path: ../../../../packages/serverpod_serialization
   serverpod_shared:

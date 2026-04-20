@@ -1,2 +1,2 @@
-export 'package:serverpod_log/serverpod_log.dart'
+export 'package:serverpod_shared/serverpod_shared.dart'
     show Log, LogConvenience, LogScoping;

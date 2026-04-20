@@ -42,7 +42,7 @@ final class CompletedOperation {
 final class ServerWatchState {
   ServerWatchState();
 
-  /// Log history entries: [LogEntry] (from serverpod_log) or
+  /// Log history entries: [LogEntry] (from serverpod_shared) or
   /// [CompletedOperation].
   final logHistory = BoundedQueueList<Object>(maxLogEntries);
 

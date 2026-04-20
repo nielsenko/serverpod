@@ -15,7 +15,6 @@ dependencies:
   meta: ^1.15.0
   path: ^1.8.3
   postgres: ^3.4.0
-  serverpod_log: SERVERPOD_VERSION
   serverpod_serialization: SERVERPOD_VERSION
   serverpod_shared: SERVERPOD_VERSION
   sqlite3: '>=2.9.4 <4.0.0'
@@ -29,8 +28,6 @@ dev_dependencies:
 dependency_overrides:
   serverpod_lints:
     path: ../serverpod_lints
-  serverpod_log:
-    path: ../serverpod_log
   serverpod_serialization:
     path: ../serverpod_serialization
   serverpod_shared:

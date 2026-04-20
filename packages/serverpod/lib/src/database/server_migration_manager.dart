@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:serverpod/src/generated/database_migration_version.dart';
 import 'package:serverpod_database/serverpod_database.dart';
-import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 /// The server migration manager handles migrations of the database.

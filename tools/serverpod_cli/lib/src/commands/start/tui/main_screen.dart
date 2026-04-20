@@ -1,5 +1,5 @@
 import 'package:nocterm/nocterm.dart' hide LogEntry;
-import 'package:serverpod_log/serverpod_log.dart';
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 import 'components.dart';
 import 'help_overlay.dart';

@@ -1,4 +1,3 @@
-import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../concepts/runtime_parameters.dart';

@@ -6,7 +6,7 @@ import 'package:serverpod/src/hot_reload/hot_reload.dart';
 import 'package:serverpod/src/server/health_check.dart';
 import 'package:serverpod/src/server/serverpod.dart' as svp;
 import 'package:serverpod/src/util/path_util.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
+import 'package:serverpod_shared/serverpod_shared.dart' hide LogEntry;
 
 import '../../serverpod.dart' hide Cache;
 import '../cache/cache.dart';

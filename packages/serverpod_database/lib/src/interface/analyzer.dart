@@ -1,4 +1,3 @@
-import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../../serverpod_database.dart' hide Protocol;

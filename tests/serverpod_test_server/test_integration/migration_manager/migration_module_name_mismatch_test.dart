@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:serverpod/src/database/server_migration_manager.dart';
 import 'package:serverpod_cli/src/migrations/generator.dart';
-import 'package:serverpod_log/serverpod_log.dart';
+import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:serverpod_test_server/test_util/test_tags.dart';
 import 'package:test/test.dart';
 import 'package:test_descriptor/test_descriptor.dart' as d;

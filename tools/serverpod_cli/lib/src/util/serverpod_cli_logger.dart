@@ -3,18 +3,18 @@ import 'dart:io';
 import 'package:cli_tools/cli_tools.dart' as cli;
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/analyzer/code_analysis_collector.dart';
-import 'package:serverpod_log/serverpod_log.dart';
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 import 'std_out_log_writer.dart';
 
 // ---------------------------------------------------------------------------
-// ServerpodCliLogger - bridges cli_tools.Logger to serverpod_log.Log
+// ServerpodCliLogger - bridges cli_tools.Logger to the serverpod_shared Log
 // ---------------------------------------------------------------------------
 
-/// A [cli.Logger] that delegates to a serverpod_log [Log].
+/// A [cli.Logger] that delegates to a serverpod_shared [Log].
 ///
-/// This bridges the cli_tools logging interface with the serverpod_log
-/// writer architecture, allowing multi-backend logging (terminal, TUI,
+/// This bridges the cli_tools logging interface with the serverpod_shared
+/// log writer architecture, allowing multi-backend logging (terminal, TUI,
 /// file, etc.) via [LogWriter] and [MultiLogWriter].
 ///
 /// [cli.LogType] is preserved by stashing it in [LogEntry.metadata]

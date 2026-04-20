@@ -16,7 +16,6 @@ dependencies:
   serverpod: SERVERPOD_VERSION
   serverpod_auth_server: SERVERPOD_VERSION
   serverpod_cloud_storage_s3: SERVERPOD_VERSION
-  serverpod_log: SERVERPOD_VERSION
   serverpod_test_module_server:
     path: ../serverpod_test_module/serverpod_test_module_server
   serverpod_test_shared:
@@ -57,8 +56,6 @@ dependency_overrides:
     path: ../../packages/serverpod_database
   serverpod_lints:
     path: ../../packages/serverpod_lints
-  serverpod_log: 
-    path: ../../packages/serverpod_log
   serverpod_serialization:
     path: ../../packages/serverpod_serialization
   serverpod_service_client:

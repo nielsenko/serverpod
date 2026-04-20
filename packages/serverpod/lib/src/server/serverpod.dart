@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
-import 'package:serverpod_log/serverpod_log.dart';
+import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/database_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/json_stdout_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/non_session_log_writer.dart';
@@ -21,7 +21,6 @@ import 'package:serverpod/src/server/health_check_manager.dart';
 import 'package:serverpod/src/server/log_manager/log_cleanup.dart';
 import 'package:serverpod/src/server/log_manager/log_settings.dart';
 import 'package:serverpod/src/server/tasks/tasks.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../authentication/default_authentication_handler.dart';
 import '../authentication/service_authentication.dart';

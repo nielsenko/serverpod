@@ -4,7 +4,6 @@ import 'package:path/path.dart' as p;
 import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod_database/src/adapters/sqlite/sqlite_migration_runner.dart';
 import 'package:serverpod_database/src/adapters/sqlite/sqlite_pool_manager.dart';
-import 'package:serverpod_log/serverpod_log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:test/test.dart';
 
