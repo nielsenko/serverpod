@@ -1,13 +1,13 @@
 import 'dart:async';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' as slog;
+import 'package:serverpod_shared/serverpod_shared.dart';
 
-import '../../../generated/protocol.dart' as proto;
+import '../../../generated/protocol.dart' as protocol;
 import '../../session.dart';
 import '../session_log_keys.dart';
 
-/// A [slog.LogWriter] that persists session-shaped scopes and their
+/// A [LogWriter] that persists session-shaped scopes and their
 /// child entries to the `serverpod_session_log` / `serverpod_log` /
 /// `serverpod_query_log` / `serverpod_message_log` tables.
 ///
@@ -15,7 +15,7 @@ import '../session_log_keys.dart';
 /// [SessionEntryKeys], so any producer using that vocabulary gets
 /// persistence.
 @internal
-class DatabaseLogWriter extends slog.LogWriter {
+class DatabaseLogWriter extends LogWriter {
   /// Set via [attach]; while null, all operations are no-ops so the
   /// writer can sit in the chain before the database is up.
   Session? _internalSession;
@@ -53,7 +53,7 @@ class DatabaseLogWriter extends slog.LogWriter {
   }
 
   @override
-  Future<void> openScope(slog.LogScope scope) async {
+  Future<void> openScope(LogScope scope) async {
     final session = _internalSession;
     if (session == null || _closing) return;
     if (!_isSessionScope(scope)) return;
@@ -67,9 +67,9 @@ class DatabaseLogWriter extends slog.LogWriter {
     await _track(future).catchError((_) => 0);
   }
 
-  Future<int> _insertOpenRow(Session session, slog.LogScope scope) async {
+  Future<int> _insertOpenRow(Session session, LogScope scope) async {
     final row = _buildSessionRow(scope, isOpen: true);
-    final inserted = await session.db.insertRow<proto.SessionLogEntry>(row);
+    final inserted = await session.db.insertRow<protocol.SessionLogEntry>(row);
     final id = inserted.id;
     if (id == null) {
       throw StateError('SessionLogEntry insert returned null id');
@@ -78,7 +78,7 @@ class DatabaseLogWriter extends slog.LogWriter {
   }
 
   @override
-  Future<void> log(slog.LogEntry entry) async {
+  Future<void> log(LogEntry entry) async {
     final session = _internalSession;
     if (session == null || _closing) return;
     final state = _sessions[entry.scope.id];
@@ -92,7 +92,7 @@ class DatabaseLogWriter extends slog.LogWriter {
 
   Future<void> _log(
     Session session,
-    slog.LogEntry entry,
+    LogEntry entry,
     _SessionState state,
     String type,
   ) async {
@@ -109,16 +109,16 @@ class DatabaseLogWriter extends slog.LogWriter {
     final order = entry.metadata?[SessionEntryKeys.order] as int? ?? 0;
     switch (type) {
       case SessionEntryTypeValues.log:
-        await session.db.insertRow<proto.LogEntry>(
+        await session.db.insertRow<protocol.LogEntry>(
           _buildLogRow(entry, sessionLogId, order),
         );
       case SessionEntryTypeValues.query:
         state.queryCount++;
-        await session.db.insertRow<proto.QueryLogEntry>(
+        await session.db.insertRow<protocol.QueryLogEntry>(
           _buildQueryRow(entry, sessionLogId, order),
         );
       case SessionEntryTypeValues.message:
-        await session.db.insertRow<proto.MessageLogEntry>(
+        await session.db.insertRow<protocol.MessageLogEntry>(
           _buildMessageRow(entry, sessionLogId, order),
         );
       default:
@@ -128,7 +128,7 @@ class DatabaseLogWriter extends slog.LogWriter {
 
   @override
   Future<void> closeScope(
-    slog.LogScope scope, {
+    LogScope scope, {
     required bool success,
     required Duration duration,
     Object? error,
@@ -153,7 +153,7 @@ class DatabaseLogWriter extends slog.LogWriter {
 
   Future<void> _closeScope(
     Session session,
-    slog.LogScope scope,
+    LogScope scope,
     _SessionState state, {
     required Duration duration,
     Object? error,
@@ -183,7 +183,7 @@ class DatabaseLogWriter extends slog.LogWriter {
       error: error?.toString(),
       stackTrace: stackTrace?.toString(),
     );
-    await session.db.updateRow<proto.SessionLogEntry>(row);
+    await session.db.updateRow<protocol.SessionLogEntry>(row);
   }
 
   Future<T> _track<T>(Future<T> work) async {
@@ -195,17 +195,17 @@ class DatabaseLogWriter extends slog.LogWriter {
     }
   }
 
-  bool _isSessionScope(slog.LogScope scope) =>
+  bool _isSessionScope(LogScope scope) =>
       scope.metadata?[SessionScopeKeys.sessionType] != null;
 
-  String _stringMeta(slog.LogScope scope, String key) =>
+  String _stringMeta(LogScope scope, String key) =>
       scope.metadata?[key] as String? ?? '';
 
-  String? _stringMetaOrNull(slog.LogScope scope, String key) =>
+  String? _stringMetaOrNull(LogScope scope, String key) =>
       scope.metadata?[key] as String?;
 
-  proto.SessionLogEntry _buildSessionRow(
-    slog.LogScope scope, {
+  protocol.SessionLogEntry _buildSessionRow(
+    LogScope scope, {
     required bool isOpen,
     int? id,
     double? duration,
@@ -225,7 +225,7 @@ class DatabaseLogWriter extends slog.LogWriter {
       SessionScopeKeys.authenticatedUserId,
     );
 
-    return proto.SessionLogEntry(
+    return protocol.SessionLogEntry(
       id: id,
       serverId: _stringMeta(scope, SessionScopeKeys.serverId),
       time: scope.startTime,
@@ -243,18 +243,18 @@ class DatabaseLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.LogEntry _buildLogRow(
-    slog.LogEntry entry,
+  protocol.LogEntry _buildLogRow(
+    LogEntry entry,
     int sessionLogId,
     int order,
   ) {
     final m = entry.metadata ?? const {};
-    return proto.LogEntry(
+    return protocol.LogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
       messageId: m[SessionEntryKeys.messageId] as int?,
       time: entry.time,
-      logLevel: _toProtoLogLevel(entry.level),
+      logLevel: _toProtocolLogLevel(entry.level),
       message: entry.message,
       error: entry.error?.toString(),
       stackTrace: entry.stackTrace?.toString(),
@@ -262,13 +262,13 @@ class DatabaseLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.QueryLogEntry _buildQueryRow(
-    slog.LogEntry entry,
+  protocol.QueryLogEntry _buildQueryRow(
+    LogEntry entry,
     int sessionLogId,
     int order,
   ) {
     final m = entry.metadata ?? const {};
-    return proto.QueryLogEntry(
+    return protocol.QueryLogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
       messageId: m[SessionEntryKeys.messageId] as int?,
@@ -282,13 +282,13 @@ class DatabaseLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.MessageLogEntry _buildMessageRow(
-    slog.LogEntry entry,
+  protocol.MessageLogEntry _buildMessageRow(
+    LogEntry entry,
     int sessionLogId,
     int order,
   ) {
     final m = entry.metadata ?? const {};
-    return proto.MessageLogEntry(
+    return protocol.MessageLogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
       messageId: m[SessionEntryKeys.messageId] as int? ?? 0,
@@ -303,24 +303,23 @@ class DatabaseLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.LogLevel _toProtoLogLevel(slog.LogLevel level) => switch (level) {
-    slog.LogLevel.debug => proto.LogLevel.debug,
-    slog.LogLevel.info => proto.LogLevel.info,
-    slog.LogLevel.warning => proto.LogLevel.warning,
-    slog.LogLevel.error => proto.LogLevel.error,
-    slog.LogLevel.fatal => proto.LogLevel.fatal,
+  protocol.LogLevel _toProtocolLogLevel(LogLevel level) => switch (level) {
+    LogLevel.debug => protocol.LogLevel.debug,
+    LogLevel.info => protocol.LogLevel.info,
+    LogLevel.warning => protocol.LogLevel.warning,
+    LogLevel.error => protocol.LogLevel.error,
+    LogLevel.fatal => protocol.LogLevel.fatal,
   };
 }
 
 class _SessionState {
   _SessionState(this.sessionLogId) {
     // Pre-attach a handler so an insert rejection isn't flagged
-    // unhandled before [_log]/[_closeScope] await it.
+    // unhandled before _log (or _closeScope) await it.
     sessionLogId.ignore();
   }
 
-  /// Resolves to the inserted SessionLogEntry row id; awaited by log and
-  /// closeScope before writing child rows / updating the parent.
+  /// Resolves to the inserted SessionLogEntry row id
   final Future<int> sessionLogId;
 
   int queryCount = 0;

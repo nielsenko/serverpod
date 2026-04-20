@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:meta/meta.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
-import '../../generated/protocol.dart' as proto;
+import '../../generated/protocol.dart' as protocol;
 import '../serverpod.dart';
 import '../session.dart';
 import 'session_log_keys.dart';
@@ -21,7 +21,7 @@ const double _microNormalizer = 1000 * 1000;
 class SessionLogManager {
   final Session _session;
   final LogWriter _writer;
-  final proto.LogSettings Function(Session) _settingsForSession;
+  final protocol.LogSettings Function(Session) _settingsForSession;
   final bool _disableSlowSessionLogging;
   final String _serverId;
 
@@ -53,7 +53,7 @@ class SessionLogManager {
   SessionLogManager({
     required Session session,
     required LogWriter writer,
-    required proto.LogSettings Function(Session) settingsForSession,
+    required protocol.LogSettings Function(Session) settingsForSession,
     required String serverId,
     bool disableSlowSessionLogging = false,
   }) : _session = session,
@@ -123,12 +123,12 @@ class SessionLogManager {
     await _writer.openScope(_scope);
   }
 
-  LogLevel _toSlogLevel(proto.LogLevel level) => switch (level) {
-    proto.LogLevel.debug => LogLevel.debug,
-    proto.LogLevel.info => LogLevel.info,
-    proto.LogLevel.warning => LogLevel.warning,
-    proto.LogLevel.error => LogLevel.error,
-    proto.LogLevel.fatal => LogLevel.fatal,
+  LogLevel _toSlogLevel(protocol.LogLevel level) => switch (level) {
+    protocol.LogLevel.debug => LogLevel.debug,
+    protocol.LogLevel.info => LogLevel.info,
+    protocol.LogLevel.warning => LogLevel.warning,
+    protocol.LogLevel.error => LogLevel.error,
+    protocol.LogLevel.fatal => LogLevel.fatal,
   };
 
   void _dispatch(LogEntry entry) {
@@ -166,14 +166,14 @@ class SessionLogManager {
   /// Logs an entry within this session.
   @internal
   void logEntry({
-    proto.LogLevel? level,
+    protocol.LogLevel? level,
     required String message,
     String? error,
     StackTrace? stackTrace,
   }) {
     _triggerCleanup();
 
-    final logLevel = level ?? proto.LogLevel.info;
+    final logLevel = level ?? protocol.LogLevel.info;
     final logSettings = _settingsForSession(_session);
     if (logLevel.index < logSettings.logLevel.index) return;
 

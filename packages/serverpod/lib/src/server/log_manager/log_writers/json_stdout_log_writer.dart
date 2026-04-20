@@ -1,18 +1,18 @@
 import 'dart:io';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' as slog;
+import 'package:serverpod_shared/serverpod_shared.dart';
 
-import '../../../generated/protocol.dart' as proto;
+import '../../../generated/protocol.dart' as protocol;
 import '../session_log_keys.dart';
 
 /// Emits session-shaped scopes and child entries as single-line JSON
 /// to stdout (stderr for errors/fatal). Every session opens and closes
-/// with a [proto.SessionLogEntry] row; log/query/message entries emit
+/// with a [protocol.SessionLogEntry] row; log/query/message entries emit
 /// the corresponding proto rows keyed by a synthetic per-scope
 /// `sessionLogId` derived from the scope id hash.
 @internal
-class JsonStdOutLogWriter extends slog.LogWriter {
+class JsonStdOutLogWriter extends LogWriter {
   /// Per-scope synthetic session log ids so child rows can reference
   /// the same id as the opening row.
   final Map<String, int> _sessionLogIds = {};
@@ -20,14 +20,14 @@ class JsonStdOutLogWriter extends slog.LogWriter {
   JsonStdOutLogWriter();
 
   @override
-  Future<void> openScope(slog.LogScope scope) async {
+  Future<void> openScope(LogScope scope) async {
     if (!_isSessionScope(scope)) return;
     final id = _sessionLogIds.putIfAbsent(scope.id, () => scope.id.hashCode);
     _emit(_buildSessionRow(scope, isOpen: true, id: id));
   }
 
   @override
-  Future<void> log(slog.LogEntry entry) async {
+  Future<void> log(LogEntry entry) async {
     final sessionLogId = _sessionLogIds[entry.scope.id];
     if (sessionLogId == null) return;
 
@@ -47,7 +47,7 @@ class JsonStdOutLogWriter extends slog.LogWriter {
 
   @override
   Future<void> closeScope(
-    slog.LogScope scope, {
+    LogScope scope, {
     required bool success,
     required Duration duration,
     Object? error,
@@ -75,13 +75,13 @@ class JsonStdOutLogWriter extends slog.LogWriter {
   void _emit(Object row) {
     final line = row.toString();
     final isError = switch (row) {
-      proto.SessionLogEntry(:final error) => error != null,
-      proto.LogEntry(:final error, :final logLevel) =>
+      protocol.SessionLogEntry(:final error) => error != null,
+      protocol.LogEntry(:final error, :final logLevel) =>
         error != null ||
-            logLevel == proto.LogLevel.error ||
-            logLevel == proto.LogLevel.fatal,
-      proto.QueryLogEntry(:final error) => error != null,
-      proto.MessageLogEntry(:final error) => error != null,
+            logLevel == protocol.LogLevel.error ||
+            logLevel == protocol.LogLevel.fatal,
+      protocol.QueryLogEntry(:final error) => error != null,
+      protocol.MessageLogEntry(:final error) => error != null,
       _ => false,
     };
     if (isError) {
@@ -91,17 +91,17 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     }
   }
 
-  bool _isSessionScope(slog.LogScope scope) =>
+  bool _isSessionScope(LogScope scope) =>
       scope.metadata?[SessionScopeKeys.sessionType] != null;
 
-  String _stringMeta(slog.LogScope scope, String key) =>
+  String _stringMeta(LogScope scope, String key) =>
       scope.metadata?[key] as String? ?? '';
 
-  String? _stringMetaOrNull(slog.LogScope scope, String key) =>
+  String? _stringMetaOrNull(LogScope scope, String key) =>
       scope.metadata?[key] as String?;
 
-  proto.SessionLogEntry _buildSessionRow(
-    slog.LogScope scope, {
+  protocol.SessionLogEntry _buildSessionRow(
+    LogScope scope, {
     required bool isOpen,
     int? id,
     double? duration,
@@ -121,7 +121,7 @@ class JsonStdOutLogWriter extends slog.LogWriter {
       SessionScopeKeys.authenticatedUserId,
     );
 
-    return proto.SessionLogEntry(
+    return protocol.SessionLogEntry(
       id: id,
       serverId: _stringMeta(scope, SessionScopeKeys.serverId),
       time: scope.startTime,
@@ -139,18 +139,18 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.LogEntry _buildLogRow(
-    slog.LogEntry entry,
+  protocol.LogEntry _buildLogRow(
+    LogEntry entry,
     int sessionLogId,
     int order,
   ) {
     final m = entry.metadata ?? const {};
-    return proto.LogEntry(
+    return protocol.LogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
       messageId: m[SessionEntryKeys.messageId] as int?,
       time: entry.time,
-      logLevel: _toProtoLogLevel(entry.level),
+      logLevel: _toProtocolLogLevel(entry.level),
       message: entry.message,
       error: entry.error?.toString(),
       stackTrace: entry.stackTrace?.toString(),
@@ -158,13 +158,13 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.QueryLogEntry _buildQueryRow(
-    slog.LogEntry entry,
+  protocol.QueryLogEntry _buildQueryRow(
+    LogEntry entry,
     int sessionLogId,
     int order,
   ) {
     final m = entry.metadata ?? const {};
-    return proto.QueryLogEntry(
+    return protocol.QueryLogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
       messageId: m[SessionEntryKeys.messageId] as int?,
@@ -178,13 +178,13 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.MessageLogEntry _buildMessageRow(
-    slog.LogEntry entry,
+  protocol.MessageLogEntry _buildMessageRow(
+    LogEntry entry,
     int sessionLogId,
     int order,
   ) {
     final m = entry.metadata ?? const {};
-    return proto.MessageLogEntry(
+    return protocol.MessageLogEntry(
       sessionLogId: sessionLogId,
       serverId: _stringMeta(entry.scope, SessionScopeKeys.serverId),
       messageId: m[SessionEntryKeys.messageId] as int? ?? 0,
@@ -199,11 +199,11 @@ class JsonStdOutLogWriter extends slog.LogWriter {
     );
   }
 
-  proto.LogLevel _toProtoLogLevel(slog.LogLevel level) => switch (level) {
-    slog.LogLevel.debug => proto.LogLevel.debug,
-    slog.LogLevel.info => proto.LogLevel.info,
-    slog.LogLevel.warning => proto.LogLevel.warning,
-    slog.LogLevel.error => proto.LogLevel.error,
-    slog.LogLevel.fatal => proto.LogLevel.fatal,
+  protocol.LogLevel _toProtocolLogLevel(LogLevel level) => switch (level) {
+    LogLevel.debug => protocol.LogLevel.debug,
+    LogLevel.info => protocol.LogLevel.info,
+    LogLevel.warning => protocol.LogLevel.warning,
+    LogLevel.error => protocol.LogLevel.error,
+    LogLevel.fatal => protocol.LogLevel.fatal,
   };
 }

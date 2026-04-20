@@ -1,18 +1,18 @@
 import 'dart:io';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' as slog;
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../session_log_keys.dart';
 
-/// A [slog.LogWriter] that emits session-tagged scopes and child entries
+/// A [LogWriter] that emits session-tagged scopes and child entries
 /// as aligned columnar text (TIME / ID / TYPE / CONTEXT / DETAILS) to
 /// stdout, matching the legacy pre-revamp `TextStdOutLogWriter` format.
 ///
 /// Only handles events whose scope carries [SessionScopeKeys.sessionType].
 /// Non-session events are ignored - those belong on a framework writer.
 @internal
-class SessionTextStdOutLogWriter extends slog.LogWriter {
+class SessionTextStdOutLogWriter extends LogWriter {
   static bool _headersWritten = false;
 
   /// Synthetic session log id per scope, stable within a process and
@@ -27,7 +27,7 @@ class SessionTextStdOutLogWriter extends slog.LogWriter {
   }
 
   @override
-  Future<void> openScope(slog.LogScope scope) async {
+  Future<void> openScope(LogScope scope) async {
     if (!_isSessionScope(scope)) return;
     final logId = _logIds.putIfAbsent(scope.id, () => scope.id.hashCode);
 
@@ -51,7 +51,7 @@ class SessionTextStdOutLogWriter extends slog.LogWriter {
   }
 
   @override
-  Future<void> log(slog.LogEntry entry) async {
+  Future<void> log(LogEntry entry) async {
     final logId = _logIds[entry.scope.id];
     if (logId == null) return;
 
@@ -110,7 +110,7 @@ class SessionTextStdOutLogWriter extends slog.LogWriter {
 
   @override
   Future<void> closeScope(
-    slog.LogScope scope, {
+    LogScope scope, {
     required bool success,
     required Duration duration,
     Object? error,
@@ -161,10 +161,10 @@ class SessionTextStdOutLogWriter extends slog.LogWriter {
     );
   }
 
-  bool _isSessionScope(slog.LogScope scope) =>
+  bool _isSessionScope(LogScope scope) =>
       scope.metadata?[SessionScopeKeys.sessionType] != null;
 
-  String? _endpointMethod(slog.LogScope scope) {
+  String? _endpointMethod(LogScope scope) {
     final endpoint = scope.metadata?[SessionScopeKeys.endpoint] as String?;
     final method = scope.metadata?[SessionScopeKeys.method] as String?;
     if (endpoint == null) return null;
@@ -172,10 +172,10 @@ class SessionTextStdOutLogWriter extends slog.LogWriter {
     return '$endpoint.$method';
   }
 
-  bool _isEntryError(slog.LogEntry entry) =>
+  bool _isEntryError(LogEntry entry) =>
       entry.error != null ||
-      entry.level == slog.LogLevel.error ||
-      entry.level == slog.LogLevel.fatal;
+      entry.level == LogLevel.error ||
+      entry.level == LogLevel.fatal;
 
   static void _writeHeaders() {
     stdout.writeln(
