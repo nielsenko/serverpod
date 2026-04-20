@@ -5,7 +5,7 @@ import 'package:clock/clock.dart';
 import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart' as dart_jsonwebtoken;
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_core_server/src/jwt/business/refresh_token_exceptions.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
+import 'package:serverpod_shared/serverpod_shared.dart' hide LogLevel;
 
 import '../../auth_user/auth_user.dart';
 import '../../common/utils/argon2_hash_util.dart';
