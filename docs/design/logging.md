@@ -18,16 +18,17 @@ The TUI can only display messages that arrive via the VM service extension proto
 
 - All server framework messages flow through a single logging abstraction.
 - The CLI receives all messages as structured events (level, message, scope).
-- Session logging and framework logging share the same `LogWriter` chain.
-- The abstraction is generic enough to live in a shared package.
+- Framework and session logging are first-class and typed - each with its own entry point (`log` vs `sessionLog`) - but share the same core primitives where that makes sense (`LogScope`, `LogLevel`, writer chain pattern).
+- The generic types live in a shared package and carry no serverpod-specific semantics. Session-specific concepts (sessionId, endpoint, query duration, …) are typed fields on session-specific records, not stringly-typed metadata on generic entries.
 - No serverpod-specific types (generated `TableRow` classes) in the logging interface.
 
 ## Implementation status
 
-- Generic types, the `Log` class, and shared writers live in `serverpod_shared/lib/src/log/`.
-- The CLI bridges to `cli_tools.Logger` via `ServerpodCliLogger`.
-- Session logging flows through the unified writer chain, including `DatabaseLogWriter` persistence.
-- Session integration is **partial**: per-session scopes are opened and closed on the writer chain, but not pushed into the surrounding `Zone`. Framework `log.info(...)` calls inside an endpoint body still resolve to the synthetic root scope rather than inheriting the session scope.
+- Generic types (`LogLevel`, `LogScope`, `LogEntry`, `LogWriter`), the `Log` class, and shared writers live in `serverpod_shared/lib/src/log/`.
+- `Serverpod` exposes two singletons: `log` (framework) and `sessionLog` (session), each backed by its own writer chain. Session events flow as typed `SessionOpen` / `SessionEntry` / `SessionClose` records, not as generic `LogEntry` values with metadata.
+- The CLI bridges `cli_tools.Logger` to `Log` via `ServerpodCliLogger`.
+- `DatabaseLogWriter`, `SessionTextLogWriter`, and `SessionJsonLogWriter` persist / echo session events; `VmServiceSessionLogWriter` surfaces them to the CLI on the same `ext.serverpod.log` wire channel as framework events.
+- Cross-chain correlation is **not yet wired**: session events go through `sessionLog` correctly, but framework `log.info(...)` calls made from inside an endpoint body have no link back to the enclosing session. They resolve to the synthetic root `LogScope` on the framework chain, so consumers see them as unrelated to the session handling the request.
 
 ## Design
 
@@ -119,13 +120,83 @@ extension LogScoping on Log {
 
 There is no separate `openScope()` / `ScopedLog` API - all scope creation goes through `progress`.
 
+### Session-side types
+
+Live in `packages/serverpod/lib/src/server/log_manager/session_log.dart`. Kept in the `serverpod` package (not promoted to `serverpod_shared`) because they carry serverpod-specific concepts (sessions).
+
+```dart
+enum SessionKind { method, methodStream, stream, web, futureCall, internal, unknown }
+enum SessionEntryKind { log, query, message }
+
+class SessionOpen {
+  final String sessionId;
+  final SessionKind kind;
+  final String label;
+  final DateTime startTime;
+  final String serverId;
+  final String? endpoint;
+  final String? method;
+  final String? futureCallName;
+}
+
+class SessionClose {
+  final String sessionId;
+  final Duration duration;
+  final bool success;
+  final bool slow;
+  final int numQueries;
+  final String? authenticatedUserId;
+  final Object? error;
+  final StackTrace? stackTrace;
+}
+
+sealed class SessionEntry { /* sessionId, order, time, messageId */ }
+class SessionLogEntry extends SessionEntry { /* level, message, error, stackTrace */ }
+class SessionQueryEntry extends SessionEntry { /* query, duration, slow, numRowsAffected, error, stackTrace */ }
+class SessionMessageEntry extends SessionEntry { /* endpoint, messageName, duration, slow, error, stackTrace */ }
+
+abstract class SessionLogWriter {
+  Future<void> open(SessionOpen event);
+  Future<void> record(SessionEntry entry);
+  Future<void> close(SessionClose event);
+  Future<void> dispose() async {}
+}
+
+class MultiSessionLogWriter extends SessionLogWriter { /* fan-out, add/remove */ }
+
+class SessionLog {
+  SessionLog(SessionLogWriter writer);
+  void open(SessionOpen event);
+  void record(SessionEntry entry);
+  void close(SessionClose event);
+  Future<void> flush();
+  Future<void> shutdown();
+}
+```
+
+### Why two chains (framework / session)
+
+Serverpod exposes two logger singletons: `log` (framework) and `sessionLog` (session). Each is backed by its own writer chain. The split is deliberate.
+
+A tempting alternative is a **single generic chain** where session-specific context travels as a `Map<String, Object?>` on `LogEntry` / `LogScope`, and writers cast-out-by-key to reach the fields they need (e.g. `scope.metadata[sessionType]`, `entry.metadata[queryDuration]`). That was the earlier shape of this design. Two problems surfaced:
+
+- **Stringly-typed session data.** Consumers stringified everything on the way in and destructured on the way out. A `Map<String, SessionScopeKeys.*>` vocabulary grew alongside the writers to keep the keys consistent - an entire file of string constants (`SessionScopeKeys`, `SessionEntryKeys`, `SessionTypeValues`, `SessionEntryTypeValues`) that the current design deletes. Every writer effectively re-implemented a typed schema on top of untyped metadata.
+- **Filter wrappers to undo cross-contamination.** Because every writer saw every event, the framework-terminal writer had to be wrapped in a `NonSessionLogWriter` that dropped session-tagged events, and the session writers each re-implemented an "only-if-session-tagged" gate. Removing the wrapper doubled every session entry on the framework terminal. The wrapper also deleted.
+
+Alternatives considered and rejected for this refactor:
+
+1. **Add a channel discriminator to the generic `LogWriter` interface** (e.g. a required `channel` field on `LogEntry` / `LogScope`). Leaks serverpod-specific semantics - what counts as a "session" - into `serverpod_shared`, which wants to stay usable as a generic logging library by other projects.
+2. **Shared `VmServiceLogWriter` as the only cross-cutting sink, keep everything else unified on one chain.** Doesn't address the stringly-typed metadata problem; sessions still round-trip through `Map<String, Object?>`.
+
+The two-chain design keeps `serverpod_shared` neutral (the generic types know nothing about sessions), while session data stays typed end-to-end inside the `serverpod` package. `VmServiceLogWriter` and its session-aware sibling `VmServiceSessionLogWriter` are two small classes - the overhead of maintaining them is dwarfed by what was deleted from both sides.
+
 ### Writer implementations
 
 Writers live in three tiers:
 
-- **Shared** (`serverpod_shared`) - framework-agnostic. Operate on `LogEntry` / `LogScope` values without inspecting metadata.
-- **Server** (`serverpod`) - aware of the session-vs-framework split. Some filter on `LogScope.metadata[SessionScopeKeys.sessionType]`; see the following section for why.
-- **CLI** (`serverpod_cli`) - consumed only by `serverpod start` / `serverpod start --watch`.
+- **Shared** (`serverpod_shared`) - framework-agnostic. Operate on `LogEntry` / `LogScope` values.
+- **Server** (`serverpod`) - implement either `LogWriter` (framework chain) or `SessionLogWriter` (session chain). No writer implements both.
+- **CLI** (`serverpod_cli`) - consumed by the serverpod CLI. `StdOutLogWriter` is the default writer for every command (`generate`, `create-migration`, etc.); `TuiLogWriter` is installed in place of it when `serverpod start --watch` runs in TUI mode.
 
 #### Shared
 
@@ -135,47 +206,33 @@ Writers live in three tiers:
 
 **`IsolatedLogWriter`** - wraps any `LogWriter` in a dedicated isolate via `IsolatedObject`. The writer factory runs on the isolate so timer-driven spinner animations keep updating even when the calling isolate is blocked.
 
-**`MultiLogWriter`** - fans out to a mutable list of child writers. Supports `add` / `remove` so the chain can be reconfigured after construction (used by the server's two-phase bootstrap; see "Writer chain (server)" below).
+**`MultiLogWriter`** / **`MultiSessionLogWriter`** - fan out to a mutable list of child writers. Support `add` / `remove` so the chain can be reconfigured after construction (used by the server's two-phase bootstrap; see "Writer chain (server)" below).
 
-#### Server
+#### Server - framework chain (`LogWriter`)
 
-**`VmServiceLogWriter`** - posts events via `developer.postEvent('ext.serverpod.log', ...)`:
+**`VmServiceLogWriter`** - posts framework events via `developer.postEvent('ext.serverpod.log', ...)`:
 
 - `log(entry)` -> `{type: 'log', level, message, scopeId, ...}`
 - `openScope(scope)` -> `{type: 'scope_start', id, label, parentId, ...}`
 - `closeScope(scope)` -> `{type: 'scope_end', id, success, duration, ...}`
 
-Available to any VM-service client that subscribes to the `Extension` stream; the CLI's TUI mode is the current consumer.
+Available to any VM-service client that subscribes to the `Extension` stream. The CLI's TUI mode is the current consumer.
 
-**`NonSessionLogWriter`** - wraps a delegate writer and drops any event whose scope metadata carries `SessionScopeKeys.sessionType`. Lets us reuse a generic writer (like `TextLogWriter`) as the framework-only terminal writer without teaching it about sessions.
+#### Server - session chain (`SessionLogWriter`)
 
-**`SessionTextStdOutLogWriter`** / **`JsonStdOutLogWriter`** - session-echo writers. The inverse filter of `NonSessionLogWriter`: accepts only session-tagged events and emits them to stdout in the selected format.
+**`SessionTextLogWriter`** - emits session events as aligned columnar text (TIME / ID / TYPE / CONTEXT / DETAILS) directly to stdout (stderr for errors). Renamed from the previous `SessionTextStdOutLogWriter`; wire format unchanged.
 
-**`DatabaseLogWriter`** - persists session-tagged entries to `serverpod_session_log` / `serverpod_log` / `serverpod_query_log`. Applies the same session-tag filter, so framework messages are intentionally not persisted. The generated `TableRow` classes stay internal to this writer and do not appear in the `LogWriter` interface.
+**`SessionJsonLogWriter`** - emits session events as single-line JSON to stdout (stderr for errors). Every session opens and closes with a `protocol.SessionLogEntry` row; log/query/message entries emit `protocol.LogEntry` / `QueryLogEntry` / `MessageLogEntry` rows keyed by a synthetic per-session `sessionLogId`. Renamed from `JsonStdOutLogWriter`.
+
+**`DatabaseLogWriter`** - persists typed session events to `serverpod_session_log` / `serverpod_log` / `serverpod_query_log` / `serverpod_message_log`. Consumes the typed records directly, so the generated `TableRow` classes stay internal to this writer. The writer is created before the database is up and attaches its internal `Session` later via `attach(session)`; before that it's a no-op.
+
+**`VmServiceSessionLogWriter`** - session counterpart of `VmServiceLogWriter`. Emits session events on the same `ext.serverpod.log` wire channel, reusing the existing `scope_start` / `log` / `scope_end` event types so the current CLI `handleServerLogEvent` keeps working. Session-specific fields (kind, endpoint, method, duration, slow, numQueries, …) are namespaced under a top-level `session` sub-object that session-aware consumers can unpack.
 
 #### CLI
 
 **`StdOutLogWriter`** - extends `SpinnerLogWriter`. Delegates log formatting to `cli_tools.StdOutLogger` for `LogType`-aware output (bullets, headers, boxes, etc.). `LogType` is read from `LogEntry.metadata[logTypeKey]`. The underlying `StdOutLogger` accepts all levels - filtering is done by `Log`, not the writer.
 
 **`TuiLogWriter`** - writer for the nocterm TUI. `log` appends a `LogEntry` to `AppStateHolder.state.logHistory`; `openScope` creates a `TrackedOperation` in `activeOperations`; `closeScope` completes it as `CompletedOperation`. Supports buffering before the TUI is mounted via `attach(holder)`.
-
-### Session-vs-framework filtering
-
-`LogWriter` is deliberately generic: it carries `LogEntry` / `LogScope` values and has no notion of "session". The serverpod runtime, however, has strong reasons to split the stream:
-
-- Session-tagged events belong in the session log tables (via `DatabaseLogWriter`) and in the session-echo format on stdout (columnar text or JSON) that external tooling scrapes.
-- Framework events (lifecycle banners, errors, health checks, …) belong on the framework terminal only, and should not be persisted as session rows.
-
-Two cleaner-sounding alternatives were rejected:
-
-1. **Two independent writer chains**, one session and one framework. Doubles the plumbing - two `Log` instances, two teardown paths - and makes cross-cutting writers like `VmServiceLogWriter` awkward (they'd have to be duplicated or wrapped into both chains).
-2. **Add a channel discriminator to the `LogWriter` interface.** Leaks serverpod-specific semantics into `serverpod_shared`, which defeats the point of a generic logging abstraction that other projects could use.
-
-Instead, the split is implemented as a convention: `SessionLogManager` stamps `SessionScopeKeys.sessionType` into every session scope's `metadata`, and server-package writers inspect that key to decide whether the event is in their remit. `SessionTextStdOutLogWriter`, `JsonStdOutLogWriter`, and `DatabaseLogWriter` accept only session-tagged events; `NonSessionLogWriter` is the inverse filter and wraps the framework-terminal writer so session events don't reach it.
-
-Without `NonSessionLogWriter`, every session log entry would print twice on stdout: once flat via `TextLogWriter` and once formatted via the session-echo writer.
-
-This is a deliberate leaky abstraction. `serverpod_shared` stays neutral; the convention keys live in `SessionScopeKeys` in the `serverpod` package, giving a single source of truth for the metadata contract. Any future split (e.g. per-tenant, per-isolate) follows the same pattern - a metadata key defined in the consuming package, with filter writers as needed - without touching the generic types.
 
 ### ServerpodCliLogger
 
@@ -186,29 +243,39 @@ Bridges `cli_tools.Logger` to `Log`. All serverpod CLI commands use `cli_tools.L
 
 This lets the CLI use any `LogWriter`-based backend (TUI, terminal, …) while preserving `LogType` formatting.
 
-### Writer chain (server)
+### Writer chains (server)
 
-Assembled in two phases by `Serverpod._initializeServerpod` / `_installConfiguredWriters`.
+Assembled in two phases by `Serverpod._initializeServerpod` / `_installConfiguredWriters`. Two independent chains live side by side: framework over `MultiLogWriter`, session over `MultiSessionLogWriter`.
 
 **Phase 1 - bootstrap** (before config is loaded):
 
 ```
-Log -> MultiLogWriter
-         -> bootstrapTextWriter  (TextLogWriter or IsolatedLogWriter(TextLogWriter.new))
-         -> VmServiceLogWriter
+log         -> MultiLogWriter
+                 -> bootstrapTextWriter  (TextLogWriter or IsolatedLogWriter(TextLogWriter.new))
+                 -> VmServiceLogWriter
+
+sessionLog  -> MultiSessionLogWriter
+                 -> VmServiceSessionLogWriter
 ```
 
-Only `bootstrapTextWriter` is tracked in `_bootstrapWriters`; `VmServiceLogWriter` stays in the chain for the process lifetime.
+Only `bootstrapTextWriter` is tracked in `_bootstrapWriters`. The two VM-service writers stay in their chains for the process lifetime.
 
-**Phase 2 - after config load**: `_installConfiguredWriters` removes the tracked bootstrap writers and appends:
+**Phase 2 - after config load**: `_installConfiguredWriters` swaps the tracked bootstrap writers for the configured ones.
+
+Framework chain (`logWriter`) replaces `bootstrapTextWriter` with a terminal-size-appropriate writer:
 
 ```
-+ NonSessionLogWriter(TextLogWriter | IsolatedLogWriter(TextLogWriter.new))  -- framework messages
-+ SessionTextStdOutLogWriter | JsonStdOutLogWriter                           -- if sessionLogs.consoleEnabled
-+ DatabaseLogWriter                                                          -- if sessionLogs.persistentEnabled and non-sqlite
++ TextLogWriter | IsolatedLogWriter(TextLogWriter.new)    -- lifecycle, errors, log.info outside a session
 ```
 
-`VmServiceLogWriter` is always present and is a no-op when no VM service is attached.
+Session chain (`sessionLogWriter`) appends the configured echo / persistence writers:
+
+```
++ SessionTextLogWriter | SessionJsonLogWriter             -- if sessionLogs.consoleEnabled
++ DatabaseLogWriter                                       -- if sessionLogs.persistentEnabled and non-sqlite
+```
+
+The two VM-service writers remain in their chains unchanged. A healthy shutdown drains `sessionLog.shutdown()` before `log.close()` on both the graceful-exit and exit-after-flush paths.
 
 ### Writer chain (CLI)
 
@@ -226,11 +293,11 @@ In TUI mode the CLI also subscribes to the server process's `ext.serverpod.log` 
 
 ### Session integration
 
-`SessionLogManager` creates a `LogScope` per session in its constructor, tagged with `SessionScopeKeys.sessionType`, `sessionId`, `endpoint`, `method`, `serverId` (and `futureCallName` for future-call sessions). It opens the scope on the writer chain via `LogWriter.openScope` (directly, not via `log.progress`) and closes it at session teardown.
+`SessionLogManager` builds a `SessionOpen` record in its constructor (sessionId, kind, label, serverId, endpoint, method, futureCallName) and dispatches it through `sessionLog.open(...)`. Query / message / log dispatches build `SessionQueryEntry` / `SessionMessageEntry` / `SessionLogEntry` records and call `sessionLog.record(...)`. At teardown `finalizeLog` builds a `SessionClose` (duration, success, slow, numQueries, authenticatedUserId, error, stackTrace) and calls `sessionLog.close(...)`. Order is assigned by the producer at call time so persisted order matches caller order even when writes race downstream.
 
-This is enough for session-aware writers (`SessionTextStdOutLogWriter`, `JsonStdOutLogWriter`, `DatabaseLogWriter`) to key off the session scope, and for `NonSessionLogWriter` to drop those events so they aren't duplicated on the framework terminal stream.
+Long-lived streaming sessions with `logStreamingSessionsContinuously: false` buffer `SessionEntry` records in memory and flush them at `finalizeLog`. The session-open `SessionOpen` is deferred to the same point so a session that produces no events is never advertised to the chain.
 
-**Remaining gap:** the session scope is not pushed into the surrounding `Zone`. Endpoint bodies that call `log.info(...)` see the synthetic root scope, not the session scope. Closing this gap requires wrapping endpoint/future-call dispatch in `runZoned(..., zoneValues: {_logScopeKey: sessionScope})` at the point `SessionLogManager` is constructed. Deferred because it touches session lifecycle, streaming sessions, and the existing `LogManager` wiring.
+**Remaining gap - cross-chain correlation.** Framework `log.info(...)` calls made from inside an endpoint go to the framework chain (`log`), not the session chain. With no linkage between the chains they resolve to the framework's synthetic root `LogScope` and appear unrelated to the enclosing session. Closing this gap requires `SessionLogManager` to mint a framework-side `LogScope` that mirrors the session and wrap endpoint dispatch in `runZoned(..., zoneValues: {_logScopeKey: sessionScope})`, so framework log calls made during the session inherit that scope. Deferred because it touches session lifecycle, streaming sessions, and the existing `LogManager` wiring.
 
 ### Ad-hoc stdout/stderr migration
 
@@ -238,32 +305,13 @@ Framework code now routes through `log` in the common case. The remaining direct
 
 - `Serverpod` constructor catch block - fires before the log chain is drained and when `exit()` is about to be called; avoids losing the init error message to an un-flushed async pipeline.
 - `_drainBeforeExit` / command-line help output (`--help`) - synchronous writes just before process exit or during argument parsing, where the async `Log` pipeline isn't a good fit.
-- `SessionTextStdOutLogWriter` / `JsonStdOutLogWriter` - writing to stdio is the writer's job.
+
+Terminal writers (`TextLogWriter`, `SessionTextLogWriter`, `SessionJsonLogWriter`, `StdOutLogWriter`) also write to stdout/stderr, but that's their job - they are the sinks the chain hands events to, not ad-hoc bypasses.
 
 ### Multi-isolate
 
-- `developer.postEvent` is process-wide - works from any isolate.
-- `stdout` / `stderr` are process-wide.
-- `LogScope` values are sendable across isolates (all fields are simple values).
-- Each isolate that needs logging initializes its own zone with a received scope.
-- `IsolatedLogWriter` wraps any `LogWriter` in a dedicated isolate for non-blocking animation.
-
-### Rendering
-
-**Alternate-mode TUI (nocterm):**
-
-- Root-scope entries render as flat log lines.
-- Non-root scopes render as tracked operations (pinned while active, collapsed on completion).
-- Nested scopes: each level as a separate tracked operation.
-- `x` toggles expand/collapse of completed operations.
-
-**Simple-mode TUI (future):**
-
-- Last log line printed, followed by active scopes.
-- No alternate screen buffer.
-- Works in any terminal.
+`Log` / `SessionLog` and their writer chains live on the main isolate. `IsolatedLogWriter` is the only writer that spans isolates: it moves a single underlying writer (typically `TextLogWriter`) onto a dedicated isolate so timer-driven spinner animations keep firing when the main isolate is blocked. For logs produced on *other* spawned isolates (hot-reload hosts, future-call workers, …), `VmServiceLogWriter.postEvent` is the escape hatch - `developer.postEvent` is process-wide, so posts from any isolate surface on the same `ext.serverpod.log` event stream.
 
 ## Open questions
 
 1. **Recursion guard.** If a `LogWriter.log()` throws, `Log.call` currently swallows the error (`catch (_) {}`). That prevents recursion but also hides writer bugs. Consider a one-shot direct-to-stderr fallback for the first writer error per process, so the failure is visible without looping.
-2. **Session scope in Zone.** As described in "Session integration", endpoint bodies don't inherit the session scope. Closing this gap is the next step toward fully unified logging.
