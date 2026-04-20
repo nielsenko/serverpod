@@ -1,9 +1,18 @@
 /// Log severity level.
 enum LogLevel {
+  /// Fine-grained diagnostic information, normally disabled in production.
   debug,
+
+  /// Informational messages describing normal operation.
   info,
+
+  /// Recoverable issues worth flagging but not halting the flow.
   warning,
+
+  /// Errors the caller is expected to handle or surface.
   error,
+
+  /// Unrecoverable failures. Usually followed by process teardown.
   fatal,
 }
 
@@ -14,12 +23,24 @@ enum LogLevel {
 /// [LogWriter.closeScope]. Log entries within the scope reference it via
 /// [LogEntry.scope].
 class LogScope {
+  /// Stable identifier for this scope. Unique within a process lifetime;
+  /// referenced by [LogEntry.scope] and by scope open/close events.
   final String id;
+
+  /// Human-readable label describing the scoped operation.
   final String label;
+
+  /// Wall-clock time at which the scope was opened.
   final DateTime startTime;
+
+  /// Enclosing scope, or `null` if this is a root scope.
   final LogScope? parent;
+
+  /// Optional scope-level structured metadata (arbitrary key/value pairs).
   final Map<String, Object?>? metadata;
 
+  /// Creates a scope. Prefer [LogScope.root] or [child] over calling this
+  /// directly.
   const LogScope({
     required this.id,
     required this.label,
@@ -51,14 +72,28 @@ class LogScope {
 
 /// A single log entry. Always belongs to a [LogScope].
 class LogEntry {
+  /// Wall-clock time at which the entry was produced.
   final DateTime time;
+
+  /// Severity of the entry.
   final LogLevel level;
+
+  /// The log message.
   final String message;
+
+  /// Scope the entry was emitted from.
   final LogScope scope;
+
+  /// Optional error associated with this entry.
   final Object? error;
+
+  /// Optional stack trace captured alongside [error].
   final StackTrace? stackTrace;
+
+  /// Optional entry-level structured metadata.
   final Map<String, Object?>? metadata;
 
+  /// Creates a log entry.
   const LogEntry({
     required this.time,
     required this.level,
@@ -98,6 +133,8 @@ abstract class LogWriter {
 class MultiLogWriter extends LogWriter {
   final List<LogWriter> _writers;
 
+  /// Creates a [MultiLogWriter] that fans out to [_writers]. The list is
+  /// held by reference and may be mutated via [add] / [remove].
   MultiLogWriter(this._writers);
 
   /// Appends [writer] to the chain. Useful when a writer can only be

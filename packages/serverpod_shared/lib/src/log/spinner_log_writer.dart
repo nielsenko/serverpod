@@ -18,9 +18,14 @@ String formatElapsed(Duration d) {
 
 /// State for a single in-progress scope with a braille spinner.
 class ActiveScope {
+  /// Tracks [scope] and starts a stopwatch for its elapsed-time display.
   ActiveScope(this.scope) : stopwatch = Stopwatch()..start();
 
+  /// The scope being rendered.
   final LogScope scope;
+
+  /// Measures how long the scope has been open; read by the spinner
+  /// formatter to display elapsed time next to the label.
   final Stopwatch stopwatch;
 }
 
@@ -33,6 +38,8 @@ class ActiveScope {
 /// Subclasses override [writeLogLine] to format log output and
 /// [formatSpinner]/[formatScopeComplete] to customize spinner appearance.
 abstract class SpinnerLogWriter extends LogWriter {
+  /// Stack of currently-open scopes, innermost last. The innermost entry
+  /// drives the active spinner line.
   final List<ActiveScope> scopeStack = [];
   Timer? _timer;
   int _frameIndex = 0;

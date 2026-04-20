@@ -14,7 +14,7 @@ class IsolatedLogWriter extends IsolatedObject<LogWriter> implements LogWriter {
 
   /// Creates an [IsolatedLogWriter] that runs the writer produced by
   /// [factory] on a dedicated isolate.
-  IsolatedLogWriter(LogWriter Function() factory) : super(factory);
+  IsolatedLogWriter(super.factory);
 
   @override
   Future<void> log(LogEntry entry) async {

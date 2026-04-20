@@ -31,8 +31,13 @@ class Log {
   Future<void> _latest = Future.value();
   bool _closed = false;
 
+  /// The minimum severity that will be forwarded to the writer. Calls below
+  /// this level short-circuit without invoking the [LogEntryFactory]. May
+  /// be changed at runtime (e.g. when a verbose flag is parsed).
   LogLevel logLevel;
 
+  /// Creates a [Log] that forwards to [_writer]. Messages below [logLevel]
+  /// are dropped before the [LogEntryFactory] runs.
   Log(this._writer, {this.logLevel = LogLevel.info});
 
   /// The current scope from the Zone, or a synthetic root if none.
@@ -64,6 +69,7 @@ class Log {
 
 /// Convenience methods for common log levels.
 extension LogConvenience on Log {
+  /// Logs [message] at [LogLevel.debug].
   void debug(String message, {Map<String, Object?>? metadata}) => this(
     LogLevel.debug,
     () => LogEntry(
@@ -75,6 +81,7 @@ extension LogConvenience on Log {
     ),
   );
 
+  /// Logs [message] at [LogLevel.info].
   void info(String message, {Map<String, Object?>? metadata}) => this(
     LogLevel.info,
     () => LogEntry(
@@ -86,6 +93,7 @@ extension LogConvenience on Log {
     ),
   );
 
+  /// Logs [message] at [LogLevel.warning].
   void warning(String message, {Map<String, Object?>? metadata}) => this(
     LogLevel.warning,
     () => LogEntry(
@@ -97,6 +105,8 @@ extension LogConvenience on Log {
     ),
   );
 
+  /// Logs [message] at [LogLevel.error], optionally attaching an [error]
+  /// value and [stackTrace].
   void error(
     String message, {
     Object? error,
@@ -115,6 +125,9 @@ extension LogConvenience on Log {
     ),
   );
 
+  /// Whether debug-level messages are currently forwarded to the writer.
+  /// Use to gate expensive message construction:
+  /// `if (log.isDebugEnabled) log.debug(formatBigObject(x));`.
   bool get isDebugEnabled => logLevel.index <= LogLevel.debug.index;
 }
 
