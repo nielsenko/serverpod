@@ -5,10 +5,11 @@ import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/database_log_writer.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/json_stdout_log_writer.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/non_session_log_writer.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/session_text_stdout_log_writer.dart';
+import 'package:serverpod/src/server/log_manager/log_writers/session_json_log_writer.dart';
+import 'package:serverpod/src/server/log_manager/log_writers/session_text_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/log_writers/vm_service_log_writer.dart';
+import 'package:serverpod/src/server/log_manager/log_writers/vm_service_session_log_writer.dart';
+import 'package:serverpod/src/server/log_manager/session_log.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
 import 'package:serverpod/src/database/server_migration_manager.dart';
@@ -41,21 +42,34 @@ typedef HealthCheckHandler =
 class Serverpod {
   static Serverpod? _instance;
 
-  /// The framework logger. Routes messages through the [LogWriter] chain.
+  /// The framework logger. Routes messages through the framework
+  /// [LogWriter] chain. Session logging uses [sessionLog] instead.
   late final Log log;
 
-  /// The writer chain shared by both framework and session logging.
+  /// The framework writer chain. Carries lifecycle banners, errors,
+  /// and any other `log.info(...)` calls made outside a session
+  /// context. Session events flow through [sessionLogWriter] instead.
   late final MultiLogWriter logWriter;
 
-  /// The writers installed in [logWriter] before config is loaded - a
+  /// The session writer chain. Carries typed [SessionOpen] /
+  /// [SessionEntry] / [SessionClose] events produced by
+  /// `SessionLogManager`.
+  late final MultiSessionLogWriter sessionLogWriter;
+
+  /// The session logger used by `SessionLogManager` to dispatch typed
+  /// session events into [sessionLogWriter].
+  late final SessionLog sessionLog;
+
+  /// Writers installed in [logWriter] before config is loaded - a
   /// single text writer for bootstrap lifecycle output. Replaced in
   /// [_installConfiguredWriters] once [config.sessionLogs] is known.
   final List<LogWriter> _bootstrapWriters = [];
 
-  /// Late-attached writer that persists session logs to the database. Set
-  /// when [config.sessionLogs.persistentEnabled] is true and the dialect is
-  /// not sqlite. Created (unattached) before the database is up; receives
-  /// its [Session] once [_internalSession] is available.
+  /// Late-attached writer that persists session logs to the database.
+  /// Set when [config.sessionLogs.persistentEnabled] is true and the
+  /// dialect is not sqlite. Created (unattached) before the database
+  /// is up; receives its [Session] once [_internalSession] is
+  /// available.
   DatabaseLogWriter? _databaseLogWriter;
 
   late Session _internalSession;
@@ -89,50 +103,48 @@ class Serverpod {
   /// [config.sessionLogs]. Called once during construction after config
   /// has been loaded.
   ///
-  /// The chain has three conceptually independent slots:
+  /// Two independent chains are assembled:
   ///
-  ///   1. Framework writer - a TextLogWriter that ignores session-tagged
-  ///      scopes/entries. Always present so framework messages
-  ///      (lifecycle banners, [logVerbose], [LogCleanupManager], errors)
-  ///      remain visible regardless of session-echo configuration.
-  ///   2. Session-echo writer - emits session-tagged scopes in the
-  ///      configured format (legacy text columns or JSON). Present only
-  ///      when [config.sessionLogs.consoleEnabled] is true.
-  ///   3. VmServiceLogWriter - always present; a no-op when the VM
-  ///      service isn't attached.
-  ///
-  /// [DatabaseLogWriter] is installed separately below when persistent
-  /// logging is configured.
+  /// - **Framework** ([logWriter]): receives lifecycle banners, errors,
+  ///   and any other `log.info(...)` calls made outside a session. The
+  ///   bootstrap [TextLogWriter] is swapped for a
+  ///   `TextLogWriter` / `IsolatedLogWriter(TextLogWriter.new)`, and
+  ///   the always-present [VmServiceLogWriter] remains.
+  /// - **Session** ([sessionLogWriter]): receives typed session events
+  ///   from `SessionLogManager`. Gets a session-echo writer (legacy
+  ///   text columns or JSON) when `sessionLogs.consoleEnabled`, a
+  ///   [DatabaseLogWriter] when persistence is configured, and the
+  ///   always-present [VmServiceSessionLogWriter] so the CLI sees
+  ///   session events on the same `ext.serverpod.log` wire channel as
+  ///   framework events.
   void _installConfiguredWriters() {
     final sessionLogs = config.sessionLogs;
 
     final frameworkTextWriter = stdout.hasTerminal
         ? IsolatedLogWriter(TextLogWriter.new)
         : TextLogWriter();
-    final frameworkWriter = NonSessionLogWriter(frameworkTextWriter);
-
-    LogWriter? sessionEchoWriter;
-    if (sessionLogs.consoleEnabled) {
-      sessionEchoWriter = switch (sessionLogs.consoleLogFormat) {
-        ConsoleLogFormat.text => SessionTextStdOutLogWriter(),
-        ConsoleLogFormat.json => JsonStdOutLogWriter(),
-      };
-    }
 
     for (final w in _bootstrapWriters) {
       logWriter.remove(w);
     }
     _bootstrapWriters.clear();
 
-    logWriter.add(frameworkWriter);
-    if (sessionEchoWriter != null) logWriter.add(sessionEchoWriter);
+    logWriter.add(frameworkTextWriter);
+
+    if (sessionLogs.consoleEnabled) {
+      final sessionEchoWriter = switch (sessionLogs.consoleLogFormat) {
+        ConsoleLogFormat.text => SessionTextLogWriter(),
+        ConsoleLogFormat.json => SessionJsonLogWriter(),
+      };
+      sessionLogWriter.add(sessionEchoWriter);
+    }
 
     final dbConfig = config.database;
     if (sessionLogs.persistentEnabled &&
         dbConfig != null &&
         dbConfig.dialect != DatabaseDialect.sqlite) {
       _databaseLogWriter = DatabaseLogWriter();
-      logWriter.add(_databaseLogWriter!);
+      sessionLogWriter.add(_databaseLogWriter!);
     }
   }
 
@@ -533,8 +545,8 @@ class Serverpod {
         log.error(message);
       }
       try {
-        await log.close();
-        await [stdout.flush(), stderr.flush()].wait;
+        await (sessionLog.shutdown(), log.close()).wait;
+        await (stdout.flush(), stderr.flush()).wait;
       } catch (_) {}
       exit(code);
     }();
@@ -559,6 +571,9 @@ class Serverpod {
     _bootstrapWriters.add(bootstrapTextWriter);
     logWriter = MultiLogWriter([bootstrapTextWriter, VmServiceLogWriter()]);
     log = Log(logWriter, logLevel: LogLevel.info);
+
+    sessionLogWriter = MultiSessionLogWriter([VmServiceSessionLogWriter()]);
+    sessionLog = SessionLog(sessionLogWriter);
 
     _writeLifecycleMessage(
       'SERVERPOD version: $serverpodVersion, dart: ${Platform.version}, time: ${DateTime.now().toUtc()}',
@@ -1345,7 +1360,7 @@ class Serverpod {
     // Drain the database log writer before tearing the pool down so its
     // in-flight close rows reach the database instead of racing pool.stop().
     try {
-      await _databaseLogWriter?.close();
+      await _databaseLogWriter?.dispose();
     } catch (e, stackTrace) {
       shutdownError = e;
       _reportException(
@@ -1372,9 +1387,10 @@ class Serverpod {
     );
 
     if (exitProcess) {
-      // Drain log chain, then the OS-level stdout/stderr buffers.
-      // On non-terminals (docker pipes, redirects) stdout is
+      // Drain both log chains, then the OS-level stdout/stderr
+      // buffers. On non-terminals (docker pipes, redirects) stdout is
       // block-buffered and [exit] does not drain it.
+      await sessionLog.shutdown();
       await log.close();
       await stdout.flush().catchError((_) {});
       await stderr.flush().catchError((_) {});

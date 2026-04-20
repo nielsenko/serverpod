@@ -157,7 +157,7 @@ abstract class Session implements DatabaseSession {
     if (enableLogging) {
       _logManager = SessionLogManager(
         session: this,
-        writer: server.serverpod.logWriter,
+        sessionLog: server.serverpod.sessionLog,
         settingsForSession: (Session session) => server
             .serverpod
             .logSettingsManager

@@ -1,38 +1,36 @@
 import 'dart:async';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
+import 'package:serverpod_shared/serverpod_shared.dart' show LogLevel;
 
 import '../../generated/protocol.dart' as protocol;
 import '../serverpod.dart';
 import '../session.dart';
-import 'session_log_keys.dart';
+import 'session_log.dart';
 
 const double _microNormalizer = 1000 * 1000;
 
-/// Per-session dispatcher for the [LogWriter] chain.
+/// Per-session dispatcher for the typed [SessionLog] chain.
 ///
-/// Each call is appended onto a rolling `_latest` Future via `.then`,
-/// giving serialized writes in invocation order and a one-pointer drain
-/// at [finalizeLog]. Long-lived streams with
+/// Each call enqueues through [SessionLog], which serialises writes in
+/// invocation order. Long-lived streams with
 /// `logStreamingSessionsContinuously: false` buffer entries in memory
 /// and flush through the same chain at finalize.
 @internal
 class SessionLogManager {
   final Session _session;
-  final LogWriter _writer;
+  final SessionLog _log;
   final protocol.LogSettings Function(Session) _settingsForSession;
   final bool _disableSlowSessionLogging;
   final String _serverId;
 
-  late final LogScope _scope;
+  late final SessionOpen _open;
 
-  Future<void> _latest = Future.value();
+  bool _opened = false;
   bool _closed = false;
 
-  bool _writerScopeOpened = false;
   bool _hasBufferedEvents = false;
-  final List<LogEntry> _buffered = [];
+  final List<SessionEntry> _buffered = [];
 
   final Stopwatch _stopwatch = Stopwatch();
 
@@ -52,31 +50,29 @@ class SessionLogManager {
   @internal
   SessionLogManager({
     required Session session,
-    required LogWriter writer,
+    required SessionLog sessionLog,
     required protocol.LogSettings Function(Session) settingsForSession,
     required String serverId,
     bool disableSlowSessionLogging = false,
   }) : _session = session,
-       _writer = writer,
+       _log = sessionLog,
        _settingsForSession = settingsForSession,
        _serverId = serverId,
        _disableSlowSessionLogging = disableSlowSessionLogging,
        _bufferStreamingLogs =
            (session is StreamingSession || session is MethodStreamSession) &&
            !settingsForSession(session).logStreamingSessionsContinuously {
-    _scope = LogScope(
-      id: '${session.sessionId.hashCode}',
+    _open = SessionOpen(
+      sessionId: '${_session.sessionId.hashCode}',
+      kind: _sessionKind(),
       label: _buildLabel(),
       startTime: session.startTime,
-      metadata: {
-        SessionScopeKeys.sessionType: _sessionTypeValue(),
-        SessionScopeKeys.sessionId: session.sessionId.toString(),
-        SessionScopeKeys.endpoint: session.endpoint,
-        SessionScopeKeys.method: session.method,
-        SessionScopeKeys.serverId: _serverId,
-        if (session is FutureCallSession)
-          SessionScopeKeys.futureCallName: session.futureCallName,
-      },
+      serverId: _serverId,
+      endpoint: session.endpoint,
+      method: session.method,
+      futureCallName: session is FutureCallSession
+          ? session.futureCallName
+          : null,
     );
 
     _stopwatch.start();
@@ -88,7 +84,7 @@ class SessionLogManager {
     if (session is! InternalSession &&
         !_bufferStreamingLogs &&
         settingsForSession(session).logAllSessions) {
-      unawaited(_ensureWriterScopeOpened());
+      _ensureOpened();
     }
   }
 
@@ -107,23 +103,23 @@ class SessionLogManager {
     };
   }
 
-  String _sessionTypeValue() => switch (_session) {
-    MethodCallSession() => SessionTypeValues.method,
-    MethodStreamSession() => SessionTypeValues.methodStream,
-    StreamingSession() => SessionTypeValues.stream,
-    FutureCallSession() => SessionTypeValues.futureCall,
-    WebCallSession() => SessionTypeValues.web,
-    InternalSession() => SessionTypeValues.internal,
-    _ => SessionTypeValues.unknown,
+  SessionKind _sessionKind() => switch (_session) {
+    MethodCallSession() => SessionKind.method,
+    MethodStreamSession() => SessionKind.methodStream,
+    StreamingSession() => SessionKind.stream,
+    FutureCallSession() => SessionKind.futureCall,
+    WebCallSession() => SessionKind.web,
+    InternalSession() => SessionKind.internal,
+    _ => SessionKind.unknown,
   };
 
-  Future<void> _ensureWriterScopeOpened() async {
-    if (_writerScopeOpened) return;
-    _writerScopeOpened = true;
-    await _writer.openScope(_scope);
+  void _ensureOpened() {
+    if (_opened) return;
+    _opened = true;
+    _log.open(_open);
   }
 
-  LogLevel _toSlogLevel(protocol.LogLevel level) => switch (level) {
+  LogLevel _toSessionLogLevel(protocol.LogLevel level) => switch (level) {
     protocol.LogLevel.debug => LogLevel.debug,
     protocol.LogLevel.info => LogLevel.info,
     protocol.LogLevel.warning => LogLevel.warning,
@@ -131,27 +127,15 @@ class SessionLogManager {
     protocol.LogLevel.fatal => LogLevel.fatal,
   };
 
-  void _dispatch(LogEntry entry) {
+  void _dispatch(SessionEntry entry) {
     if (_closed) return;
     if (_bufferStreamingLogs) {
       _buffered.add(entry);
       _hasBufferedEvents = true;
       return;
     }
-    _enqueueWrite(entry);
-  }
-
-  void _enqueueWrite(LogEntry entry) {
-    _latest = _latest.then((_) async {
-      try {
-        await _ensureWriterScopeOpened();
-        await _writer.log(entry);
-      } catch (_) {
-        // Writer errors (e.g. DB pool closing during shutdown) are
-        // expected; swallow so they don't surface as unhandled async
-        // errors and the chain stays healthy.
-      }
-    });
+    _ensureOpened();
+    _log.record(entry);
   }
 
   /// Unawaited so shutdown isn't wedged if the cleanup DB query stalls
@@ -179,18 +163,15 @@ class SessionLogManager {
 
     final order = ++_nextEntryOrder;
     _dispatch(
-      LogEntry(
+      SessionLogEntry(
+        sessionId: _open.sessionId,
+        order: order,
         time: DateTime.now(),
-        level: _toSlogLevel(logLevel),
+        level: _toSessionLogLevel(logLevel),
         message: message,
-        scope: _scope,
         error: error,
         stackTrace: stackTrace,
-        metadata: {
-          SessionEntryKeys.type: SessionEntryTypeValues.log,
-          SessionEntryKeys.order: order,
-          SessionEntryKeys.messageId: ?_session.messageId,
-        },
+        messageId: _session.messageId,
       ),
     );
   }
@@ -219,20 +200,17 @@ class SessionLogManager {
 
     final order = ++_nextEntryOrder;
     _dispatch(
-      LogEntry(
+      SessionQueryEntry(
+        sessionId: _open.sessionId,
+        order: order,
         time: DateTime.now(),
-        level: LogLevel.debug,
-        message: query,
-        scope: _scope,
+        query: query,
+        duration: duration,
+        slow: slow,
+        numRowsAffected: numRowsAffected,
         error: error,
-        metadata: {
-          SessionEntryKeys.type: SessionEntryTypeValues.query,
-          SessionEntryKeys.order: order,
-          SessionEntryKeys.queryDuration: executionTime,
-          SessionEntryKeys.queryNumRows: numRowsAffected,
-          SessionEntryKeys.querySlow: slow,
-          SessionEntryKeys.messageId: ?_session.messageId,
-        },
+        stackTrace: stackTrace,
+        messageId: _session.messageId,
       ),
     );
   }
@@ -261,29 +239,24 @@ class SessionLogManager {
 
     final order = ++_nextEntryOrder;
     _dispatch(
-      LogEntry(
+      SessionMessageEntry(
+        sessionId: _open.sessionId,
+        order: order,
         time: DateTime.now(),
-        level: LogLevel.info,
-        message: '$messageName ($endpointName)',
-        scope: _scope,
+        endpoint: endpointName,
+        messageName: messageName,
+        messageId: messageId,
+        duration: duration,
+        slow: slow,
         error: error,
         stackTrace: stackTrace,
-        metadata: {
-          SessionEntryKeys.type: SessionEntryTypeValues.message,
-          SessionEntryKeys.order: order,
-          SessionEntryKeys.messageEndpoint: endpointName,
-          SessionEntryKeys.messageName: messageName,
-          SessionEntryKeys.messageId: messageId,
-          SessionEntryKeys.messageDuration: executionTime,
-          SessionEntryKeys.messageSlow: slow,
-        },
       ),
     );
   }
 
   /// Drains any in-flight writes without closing the session.
   @internal
-  Future<void> flush() => _latest;
+  Future<void> flush() => _log.flush();
 
   /// Finalizes the session log. Called when the session closes.
   @internal
@@ -307,45 +280,34 @@ class SessionLogManager {
         logSettings.logAllSessions ||
         (logSettings.logSlowSessions && isSlow) ||
         (logSettings.logFailedSessions && exception != null) ||
-        _writerScopeOpened ||
+        _opened ||
         _hasBufferedEvents;
 
     if (shouldEmit) {
-      try {
-        await _ensureWriterScopeOpened();
-      } catch (_) {}
-
+      _ensureOpened();
       for (final entry in _buffered) {
-        _enqueueWrite(entry);
+        _log.record(entry);
       }
       _buffered.clear();
     }
 
     _closed = true;
-    await _latest;
+    await _log.flush();
 
     if (!shouldEmit) return;
 
-    // Fresh scope with the same id so stateful writers look up the same
-    // per-scope record; metadata carries close-time fields.
-    final closeScope = LogScope(
-      id: _scope.id,
-      label: _scope.label,
-      startTime: _scope.startTime,
-      parent: _scope.parent,
-      metadata: {
-        ...?_scope.metadata,
-        SessionScopeKeys.slow: isSlow,
-        SessionScopeKeys.numQueries: _queryCount,
-        SessionScopeKeys.authenticatedUserId: ?authenticatedUserId,
-      },
+    _log.close(
+      SessionClose(
+        sessionId: _open.sessionId,
+        duration: _stopwatch.elapsed,
+        success: exception == null,
+        slow: isSlow,
+        numQueries: _queryCount,
+        authenticatedUserId: authenticatedUserId,
+        error: exception != null ? Exception(exception) : null,
+        stackTrace: stackTrace,
+      ),
     );
-    await _writer.closeScope(
-      closeScope,
-      success: exception == null,
-      duration: _stopwatch.elapsed,
-      error: exception != null ? Exception(exception) : null,
-      stackTrace: stackTrace,
-    );
+    await _log.flush();
   }
 }
