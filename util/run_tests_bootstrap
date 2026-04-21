@@ -11,6 +11,7 @@ export SERVERPOD_SILENCE_LIFECYCLE_MESSAGES="1"
 # Makes script exit on first non-zero error code
 set -e
 
+export SERVERPOD_HOME=$(pwd)
 cd tests/bootstrap_project
 
 dart test --concurrency=1

@@ -426,7 +426,10 @@ jobs:
 
           colima start
       - name: Run unit tests
-        run: dart test --concurrency=1 --reporter=failures-only
+        shell: bash
+        run: |
+          export SERVERPOD_HOME="$(cd ../.. && pwd)"
+          dart test --concurrency=1 --reporter=failures-only
         working-directory: ${{ matrix.path }}
 
   migration_e2e_tests:

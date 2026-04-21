@@ -1,4 +1,5 @@
 services:
+  # {{#postgres}}
   # Test services
   postgres_test:
     image: pgvector/pgvector:pg16
@@ -10,6 +11,8 @@ services:
       POSTGRES_PASSWORD: "DB_TEST_PASSWORD"
     volumes:
       - modulename_test_data:/var/lib/postgresql/data
+  # {{/postgres}}
+  # {{#redis}}
   redis_test:
     image: redis:6.2.6
     ports:
@@ -17,6 +20,9 @@ services:
     command: redis-server --requirepass "REDIS_TEST_PASSWORD"
     environment:
       - REDIS_REPLICATION_MODE=master
+  # {{/redis}}
+# {{#postgres}}
 
 volumes:
   modulename_test_data:
+# {{/postgres}}
