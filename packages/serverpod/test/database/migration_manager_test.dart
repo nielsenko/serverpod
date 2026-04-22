@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:serverpod/src/database/server_migration_manager.dart';
 import 'package:serverpod_database/src/adapters/postgres/value_encoder.dart';
 import 'package:serverpod_database/src/interface/value_encoder.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -14,10 +13,7 @@ void main() {
 
     setUp(() {
       tempDir = Directory.systemTemp.createTempSync('migration_test_');
-      migrationManager = ServerMigrationManager(
-        tempDir,
-        log: Log(TestLogWriter()),
-      );
+      migrationManager = ServerMigrationManager(tempDir);
       // Populate available versions to simulate migrations on disk
       migrationManager.availableVersions.addAll([
         '20251111155452875',
@@ -70,10 +66,7 @@ void main() {
     test(
       'Given empty available versions when checking indexOf then returns -1.',
       () {
-        final emptyMigrationManager = ServerMigrationManager(
-          tempDir,
-          log: Log(TestLogWriter()),
-        );
+        final emptyMigrationManager = ServerMigrationManager(tempDir);
         const anyVersion = '20251111155452875';
 
         expect(

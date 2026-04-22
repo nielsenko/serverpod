@@ -9,7 +9,7 @@ import 'package:serverpod_cli/src/runner/serverpod_command.dart';
 import 'package:serverpod_cli/src/runner/serverpod_command_runner.dart';
 import 'package:serverpod_cli/src/util/project_name.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' hide ExitException;
+import 'package:serverpod_shared/serverpod_shared.dart' hide ExitException, log;
 
 import 'create_migration.dart' show CreateMigrationCommand;
 

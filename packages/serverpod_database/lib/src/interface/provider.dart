@@ -36,5 +36,5 @@ abstract interface class DatabaseProvider {
   MigrationRunner createMigrationRunner({String? runMode});
 
   /// Creates a new [DatabaseAnalyzer] for the given [database].
-  DatabaseAnalyzer createAnalyzer(Database database, {required Log log});
+  DatabaseAnalyzer createAnalyzer(Database database);
 }

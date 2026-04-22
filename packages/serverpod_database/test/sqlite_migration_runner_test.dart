@@ -27,7 +27,6 @@ void main() {
     database = DatabaseConstructor.create(
       session: session,
       poolManager: poolManager,
-      log: Log(TestLogWriter()),
     );
   });
 

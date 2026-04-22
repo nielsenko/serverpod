@@ -136,13 +136,13 @@ class FutureCallManager {
   Future<void> runScheduledFutureCalls() async {
     await _checkBrokenFutureCalls();
     if (_futureCalls.isEmpty) {
-      Serverpod.instance.log.info(
+      log.info(
         'No future calls registered. Skipping processing.',
       );
       return;
     }
 
-    Serverpod.instance.log.info('Processing future calls.');
+    log.info('Processing future calls.');
 
     await _scanner.scanFutureCallEntries();
 

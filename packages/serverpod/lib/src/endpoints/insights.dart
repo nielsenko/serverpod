@@ -4,7 +4,6 @@ import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod/src/database/server_migration_manager.dart';
 import 'package:serverpod/src/hot_reload/hot_reload.dart';
 import 'package:serverpod/src/server/health_check.dart';
-import 'package:serverpod/src/server/serverpod.dart' as svp;
 import 'package:serverpod/src/util/path_util.dart';
 import 'package:serverpod_shared/serverpod_shared.dart' hide LogEntry;
 
@@ -195,7 +194,7 @@ class InsightsEndpoint extends Endpoint {
   /// Performs a hot reload of the server.
   Future<bool> hotReload(Session session) async {
     if (!await HotReloader.isHotReloadAvailable()) {
-      server.serverpod.log.error(
+      log.error(
         'Hot reload is not available. You need to run dart with --enable-vm-service.',
       );
       return false;
@@ -242,7 +241,6 @@ class InsightsEndpoint extends Endpoint {
 
     var versions = await ServerMigrationManager(
       Directory.current,
-      log: Serverpod.instance.log,
     ).listAvailableVersions();
 
     var latestAvailableMigrations = <DatabaseMigrationVersionModel>[];
@@ -372,7 +370,7 @@ Future<List<DatabaseMigrationVersion>> _getInstalledMigrationVersions(
     return await DatabaseMigrationVersion.db.find(session);
   } catch (e) {
     // Ignore if the table does not exist.
-    svp.Serverpod.instance.log.error('Failed to get installed migrations: $e');
+    log.error('Failed to get installed migrations: $e');
     return [];
   }
 }

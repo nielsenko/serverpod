@@ -15,7 +15,7 @@ import '../session_log.dart';
 /// detached the writer is a no-op so it can sit in the session-log
 /// chain before the database is up.
 @internal
-class DatabaseLogWriter extends SessionLogWriter {
+class DatabaseSessionLogWriter extends SessionLogWriter {
   /// Set via [attach]; while null, all operations are no-ops so the
   /// writer can sit in the chain before the database is up.
   Session? _internalSession;
@@ -34,9 +34,9 @@ class DatabaseLogWriter extends SessionLogWriter {
   /// shutdown.
   static const _drainTimeout = Duration(seconds: 5);
 
-  /// Creates a detached [DatabaseLogWriter]. Call [attach] once the
+  /// Creates a detached [DatabaseSessionLogWriter]. Call [attach] once the
   /// internal session is available.
-  DatabaseLogWriter();
+  DatabaseSessionLogWriter();
 
   /// Attaches the [Session] used to perform writes.
   void attach(Session session) {

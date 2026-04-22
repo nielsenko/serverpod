@@ -1,4 +1,5 @@
 import 'package:cli_tools/cli_tools.dart' as cli;
+import 'package:serverpod_shared/log_io.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 /// Metadata key used to pass [cli.LogType] through [LogEntry.metadata].

@@ -8,7 +8,7 @@ import 'postgres_default_value.dart';
 /// Analyzes the structure of [Database]s.
 class PostgresDatabaseAnalyzer extends DatabaseAnalyzer {
   /// Creates a new [PostgresDatabaseAnalyzer] for the given [database].
-  PostgresDatabaseAnalyzer({required super.database, required super.log});
+  PostgresDatabaseAnalyzer({required super.database});
 
   @override
   Future<String> getCurrentDatabaseName() async {

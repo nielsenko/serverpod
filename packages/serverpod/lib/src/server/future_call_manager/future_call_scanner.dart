@@ -86,7 +86,7 @@ class FutureCallScanner {
         message: message,
       );
 
-      Serverpod.instance.log.error(
+      log.error(
         message,
         error: error,
         stackTrace: stackTrace,

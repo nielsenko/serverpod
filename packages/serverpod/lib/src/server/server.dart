@@ -55,7 +55,6 @@ class Server implements RouterInjectable {
     return DatabaseConstructor.create(
       session: session,
       poolManager: databasePoolManager,
-      log: serverpod.log,
     );
   }
 
@@ -580,9 +579,9 @@ class Server implements RouterInjectable {
     OperationType? operationType,
   }) async {
     if (message != null) {
-      serverpod.log.error(message, error: e, stackTrace: stackTrace);
+      log.error(message, error: e, stackTrace: stackTrace);
     } else {
-      serverpod.log.error('$e', error: e, stackTrace: stackTrace);
+      log.error('$e', error: e, stackTrace: stackTrace);
     }
 
     var context = request != null

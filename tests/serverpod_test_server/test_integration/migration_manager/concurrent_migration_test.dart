@@ -8,7 +8,6 @@ import '../test_tools/serverpod_test_tools.dart';
 import 'package:test_descriptor/test_descriptor.dart' as d;
 import 'package:serverpod/src/database/server_migration_manager.dart';
 import 'package:serverpod_cli/src/migrations/generator.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
 
 void main() {
   withServerpod(
@@ -48,7 +47,6 @@ void main() {
       setUp(() async {
         existingMigrations = await ServerMigrationManager(
           Directory.current,
-          log: Log(TestLogWriter()),
         ).listAvailableVersions();
 
         migrationRegistryContents = [
@@ -109,7 +107,6 @@ void main() {
         () async {
           var migrationManager = ServerMigrationManager(
             Directory(d.sandbox),
-            log: Log(TestLogWriter()),
           );
 
           var concurrentMigrations = Future.wait([

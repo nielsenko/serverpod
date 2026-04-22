@@ -10,10 +10,8 @@ class ServerMigrationManager extends MigrationManager {
   ServerMigrationManager(
     Directory projectDirectory, {
     super.runMode,
-    required Log log,
   }) : super(
          FileSystemMigrationArtifactStore(projectDirectory: projectDirectory),
-         log: log,
        );
 
   @override
@@ -43,10 +41,7 @@ class ServerMigrationManager extends MigrationManager {
   /// Verifies the integrity of the database.
   ///
   /// Returns true if the database is intact, false otherwise.
-  static Future<bool> verifyDatabaseIntegrity(
-    DatabaseSession session, {
-    required Log log,
-  }) async {
-    return await MigrationManager.verifyDatabaseIntegrity(session, log: log);
+  static Future<bool> verifyDatabaseIntegrity(DatabaseSession session) async {
+    return await MigrationManager.verifyDatabaseIntegrity(session);
   }
 }

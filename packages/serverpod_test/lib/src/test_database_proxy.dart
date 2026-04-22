@@ -29,9 +29,6 @@ class TestDatabaseProxy implements Database {
   DatabaseDialect get dialect => _db.dialect;
 
   @override
-  Log get log => _db.log;
-
-  @override
   SerializationManagerServer get serializationManager =>
       _db.serializationManager;
 

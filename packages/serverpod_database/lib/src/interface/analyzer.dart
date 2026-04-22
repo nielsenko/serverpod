@@ -10,10 +10,8 @@ abstract class DatabaseAnalyzer {
   /// The [Database] to analyze.
   final Database database;
 
-  final Log _log;
-
   /// Creates a new [DatabaseAnalyzer] for the given [database].
-  DatabaseAnalyzer({required this.database, required Log log}) : _log = log;
+  DatabaseAnalyzer({required this.database});
 
   /// Analyze the structure of the [database].
   Future<DatabaseDefinition> analyze() async {
@@ -70,7 +68,7 @@ abstract class DatabaseAnalyzer {
       ];
     } catch (e) {
       // Ignore if the table does not exist.
-      _log.error('Failed to get installed migrations: $e');
+      log.error('Failed to get installed migrations: $e');
       return [];
     }
   }

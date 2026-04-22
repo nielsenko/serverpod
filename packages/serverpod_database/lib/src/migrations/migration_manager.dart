@@ -8,7 +8,6 @@ import '../migrations/table_comparison_warning.dart';
 /// The migration manager handles migrations of the database.
 abstract class MigrationManager {
   final MigrationArtifactStore _artifactStore;
-  final Log _log;
 
   /// The run mode of the server.
   ///
@@ -31,8 +30,7 @@ abstract class MigrationManager {
   final List<String> availableVersions = [];
 
   /// Creates a new migration manager.
-  MigrationManager(this._artifactStore, {this.runMode, required Log log})
-    : _log = log;
+  MigrationManager(this._artifactStore, {this.runMode});
 
   /// Loads the installed versions of the migrations from the database.
   ///
@@ -114,7 +112,7 @@ abstract class MigrationManager {
 
       var definitionModuleName = await _loadLatestDefinitionModuleName();
       if (definitionModuleName != null && definitionModuleName != moduleName) {
-        _log.warning(
+        log.warning(
           'The module name in the migration definition '
           '("$definitionModuleName") does not match the module name of the '
           'serialization manager ("$moduleName"). This may indicate that the '
@@ -244,7 +242,7 @@ abstract class MigrationManager {
         );
         migrationsApplied.add(code.version);
       } catch (e) {
-        _log.error('Failed to apply migration ${code.version}.', error: e);
+        log.error('Failed to apply migration ${code.version}.', error: e);
         rethrow;
       }
     }
@@ -280,7 +278,7 @@ abstract class MigrationManager {
     }
 
     if (warnings.isNotEmpty) {
-      _log.warning(
+      log.warning(
         'The following module migration registries could not be loaded:\n'
         '${warnings.map((w) => ' - $w').join('\n')}',
       );
@@ -296,12 +294,9 @@ abstract class MigrationManager {
     await migrationRunner.runMigrations(session, action);
   }
 
-  /// Returns true if the database structure is up to date. If not, it will
-  /// print a warning using [writeWarning].
-  static Future<bool> verifyDatabaseIntegrity(
-    DatabaseSession session, {
-    required Log log,
-  }) async {
+  /// Returns true if the database structure is up to date. If not, it
+  /// logs a warning via the global [log].
+  static Future<bool> verifyDatabaseIntegrity(DatabaseSession session) async {
     var warnings = <String>[];
 
     var liveDatabase = await session.db.analyzer.analyze();

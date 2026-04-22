@@ -1,4 +1,4 @@
-import 'package:serverpod_shared/serverpod_shared.dart';
+import 'package:serverpod_shared/serverpod_shared.dart' hide log;
 import 'package:vm_service/vm_service.dart' show Event;
 
 import '../../../util/serverpod_cli_logger.dart';

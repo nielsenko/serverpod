@@ -38,13 +38,13 @@ class HealthCheckManager {
     if (interval < const Duration(seconds: 1)) {
       throw ArgumentError('Interval must be at least 1 second.');
     } else if (interval < const Duration(minutes: 1)) {
-      _pod.log.warning(
+      log.warning(
         'Using a health check interval less than 1 minute can cause '
         'excessive database activity and considerably reduce performance. '
         'It is recommended to use a minimum interval of 1 minute.',
       );
     } else if (interval > const Duration(minutes: 5)) {
-      _pod.log.warning(
+      log.warning(
         'Using a health check interval greater than 5 minutes in '
         'servers with lower load can lead to the health check manager waking '
         'the database unnecessarily. The recommended interval is between 1 and '
@@ -58,7 +58,7 @@ class HealthCheckManager {
     _running = true;
 
     if (Platform.isWindows) {
-      _pod.log.warning(
+      log.warning(
         'CPU and memory usage metrics are not supported on Windows.',
       );
       return;
@@ -67,7 +67,7 @@ class HealthCheckManager {
     try {
       await SystemResources.init();
     } catch (e, stackTrace) {
-      _pod.log.warning(
+      log.warning(
         'CPU and memory usage metrics are not supported on this platform.',
         metadata: {'error': '$e', 'stackTrace': '$stackTrace'},
       );
@@ -125,7 +125,7 @@ class HealthCheckManager {
 
   Future<void> _innerPerformHealthCheck() async {
     if (_pod.config.role == ServerpodRole.maintenance) {
-      _pod.log.info('Performing health checks.');
+      log.info('Performing health checks.');
     }
 
     var session = _pod.internalSession;
@@ -440,9 +440,9 @@ class HealthCheckManager {
     String? message,
   }) {
     if (message != null) {
-      _pod.log.error(message, error: e, stackTrace: stackTrace);
+      log.error(message, error: e, stackTrace: stackTrace);
     } else {
-      _pod.log.error('$e', error: e, stackTrace: stackTrace);
+      log.error('$e', error: e, stackTrace: stackTrace);
     }
 
     _pod.internalSubmitEvent(

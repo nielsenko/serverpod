@@ -7,6 +7,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:serverpod/src/server/features.dart';
 import 'package:serverpod/src/server/log_manager/session_log_manager.dart';
 import 'package:serverpod/src/server/serverpod.dart';
+import 'package:serverpod_shared/serverpod_shared.dart' as shared show log;
 
 import '../cache/caches.dart';
 
@@ -157,7 +158,6 @@ abstract class Session implements DatabaseSession {
     if (enableLogging) {
       _logManager = SessionLogManager(
         session: this,
-        sessionLog: server.serverpod.sessionLog,
         settingsForSession: (Session session) => server
             .serverpod
             .logSettingsManager
@@ -210,7 +210,7 @@ abstract class Session implements DatabaseSession {
         authenticatedUserId: _authenticated?.userIdentifier,
       );
     } catch (e, stackTrace) {
-      serverpod.log.error(
+      shared.log.error(
         'Failed to close session: $e',
         error: e,
         stackTrace: stackTrace,

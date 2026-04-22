@@ -89,7 +89,7 @@ The `log` singleton from `cli_tools` is used throughout the CLI: `WatchSession`,
 
 #### 2. `LogWriter` interface (server side)
 
-The server's structured logging system. `SessionLogManager` writes session logs (endpoint calls, queries, streaming messages) through `LogWriter` implementations: `TextStdOutLogWriter` (human-readable to stdout), `JsonStdOutLogWriter` (JSON to stdout), `DatabaseLogWriter` (persisted to database), composed via `MultipleLogWriter` and `CachedLogWriter`.
+The server's structured logging system. `SessionLogManager` writes session logs (endpoint calls, queries, streaming messages) through `LogWriter` implementations: `TextStdOutLogWriter` (human-readable to stdout), `JsonStdOutLogWriter` (JSON to stdout), `DatabaseSessionLogWriter` (persisted to database), composed via `MultipleLogWriter` and `CachedLogWriter`.
 
 Lifecycle messages (`_writeLifecycleMessage()`) are a separate path - direct `stdout.writeln()` calls in `serverpod.dart` for startup/shutdown status ("SERVERPOD version: ...", "All servers started", "Serverpod start complete", etc.). Error reporting (`_reportException()`) writes directly to `stderr.writeln()`.
 

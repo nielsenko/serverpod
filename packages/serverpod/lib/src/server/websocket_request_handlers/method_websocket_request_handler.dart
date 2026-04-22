@@ -136,7 +136,7 @@ class MethodWebsocketRequestHandler {
       );
       if (e is! UnknownMessageException ||
           server.serverpod.runtimeSettings.logMalformedCalls) {
-        server.serverpod.log.error(
+        log.error(
           'Method stream websocket error: $e',
           error: e,
           stackTrace: stackTrace,
@@ -543,7 +543,7 @@ class _WebSocketIntermediary {
         _ => throw ArgumentError.notNull('data'),
       };
     } catch (e, stackTrace) {
-      server.serverpod.log.error(
+      log.error(
         'Error "$e", when trying to send data over websocket: $data',
         error: e,
         stackTrace: stackTrace,

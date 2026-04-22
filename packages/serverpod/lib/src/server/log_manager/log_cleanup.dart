@@ -49,7 +49,7 @@ class LogCleanupManager {
           _activeCleanupTask = null;
         })
         .catchError((error, stackTrace) {
-          Serverpod.instance.log.error(
+          log.error(
             'Failed to clean up logs',
             error: error,
             stackTrace: stackTrace,
@@ -77,7 +77,7 @@ class LogCleanupManager {
       parameters: QueryParameters.named({'cutoffTime': cutoffTime}),
     );
 
-    Serverpod.instance.log.info(
+    log.info(
       'Cleaned up $deletedCount log entries from '
       '"$_sessionLogsTable" older than $_retentionPeriod.',
     );
@@ -98,7 +98,7 @@ class LogCleanupManager {
       )
     ''');
 
-    Serverpod.instance.log.info(
+    log.info(
       'Cleaned up $deletedCount log entries from '
       '"$_sessionLogsTable" exceeding the retention count of $retentionCount.',
     );

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:serverpod/src/server/log_manager/log.dart';
-import 'package:serverpod/src/server/serverpod.dart';
 
 import 'event_handler.dart';
 
@@ -43,11 +42,11 @@ class DiagnosticEventDispatcher implements DiagnosticEventHandler {
       if (errors is Iterable<AsyncError?>) {
         for (var error in errors) {
           if (error != null) {
-            Serverpod.instance.log.error('Error in event handler: $error');
+            log.error('Error in event handler: $error');
           }
         }
       } else {
-        Serverpod.instance.log.error('Error in an event handler: $errors');
+        log.error('Error in an event handler: $errors');
       }
       return e.values;
     });

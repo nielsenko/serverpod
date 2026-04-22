@@ -15,16 +15,16 @@ import '../session_log.dart';
 /// [SessionOpen] / [SessionEntry] / [SessionClose] records, so the
 /// metadata-key round-trip from the previous design is gone.
 @internal
-class SessionTextLogWriter extends SessionLogWriter {
+class TextSessionLogWriter extends SessionLogWriter {
   static bool _headersWritten = false;
 
   /// Synthetic session log id per session, stable within a process and
   /// shared across the session's child rows.
   final Map<String, _OpenState> _sessions = {};
 
-  /// Creates a [SessionTextLogWriter]. Writes column headers to stdout
+  /// Creates a [TextSessionLogWriter]. Writes column headers to stdout
   /// on first instantiation in the process.
-  SessionTextLogWriter() {
+  TextSessionLogWriter() {
     if (!_headersWritten) {
       _writeHeaders();
       _headersWritten = true;

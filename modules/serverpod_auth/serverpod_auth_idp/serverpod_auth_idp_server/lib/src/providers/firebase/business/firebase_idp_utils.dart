@@ -229,7 +229,7 @@ class FirebaseIdpUtils {
 
 extension on Session {
   Never logAndThrow(final String message) {
-    log(message, level: LogLevel.debug);
+    this.log(message, level: LogLevel.debug);
     throw FirebaseIdTokenVerificationException();
   }
 }

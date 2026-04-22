@@ -33,7 +33,7 @@ Future<LegacySession?> resolveLegacySession(
 
     return legacySession;
   } catch (exception, stackTrace) {
-    session.serverpod.log.error(
+    log.error(
       'Failed authentication: $exception',
       stackTrace: stackTrace,
     );

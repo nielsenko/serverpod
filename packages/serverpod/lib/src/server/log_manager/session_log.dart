@@ -382,6 +382,18 @@ class SessionLog {
   }
 }
 
+/// Global writer chain that backs [sessionLog]. Callers configure the
+/// chain by adding writers with [MultiSessionLogWriter.add] and removing
+/// them with [MultiSessionLogWriter.remove]; identity is stable for the
+/// process lifetime.
+final MultiSessionLogWriter sessionLogWriter = MultiSessionLogWriter([]);
+
+/// Global [SessionLog] that forwards to [sessionLogWriter]. Identity is
+/// stable: the instance is constructed at library init and never
+/// reassigned. Entry points configure session logging by mutating
+/// [sessionLogWriter], not by replacing [sessionLog].
+final SessionLog sessionLog = SessionLog(sessionLogWriter);
+
 /// Maps serverpod's generated [protocol.LogLevel] to the shared
 /// [LogLevel] used on session entries.
 @internal

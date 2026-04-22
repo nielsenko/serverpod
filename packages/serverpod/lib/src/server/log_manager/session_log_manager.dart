@@ -50,7 +50,6 @@ class SessionLogManager {
   @internal
   SessionLogManager({
     required Session session,
-    required SessionLog sessionLog,
     required protocol.LogSettings Function(Session) settingsForSession,
     required String serverId,
     bool disableSlowSessionLogging = false,

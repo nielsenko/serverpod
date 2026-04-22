@@ -12,14 +12,14 @@ import '../session_log.dart';
 /// entries emit the corresponding protocol rows keyed by a synthetic
 /// per-session `sessionLogId` derived from the session id hash.
 @internal
-class SessionJsonLogWriter extends SessionLogWriter {
+class JsonSessionLogWriter extends SessionLogWriter {
   /// Per-session state: synthetic session log id + cached open event
   /// so child rows and the close row can reference them without
   /// round-tripping through scope metadata.
   final Map<String, _OpenState> _sessions = {};
 
-  /// Creates a [SessionJsonLogWriter].
-  SessionJsonLogWriter();
+  /// Creates a [JsonSessionLogWriter].
+  JsonSessionLogWriter();
 
   @override
   Future<void> open(SessionOpen event) async {

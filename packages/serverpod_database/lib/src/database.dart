@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:serverpod_shared/serverpod_shared.dart';
-
 import '../serverpod_database.dart';
 import 'interface/database_connection.dart';
 
@@ -12,12 +10,10 @@ extension DatabaseConstructor on Database {
   static Database create({
     required DatabaseSession session,
     required DatabasePoolManager poolManager,
-    required Log log,
   }) {
     return Database._(
       session: session,
       poolManager: poolManager,
-      log: log,
     );
   }
 }
@@ -33,7 +29,6 @@ class Database {
   Database._({
     required DatabaseSession session,
     required DatabasePoolManager poolManager,
-    required this.log,
   }) : _session = session,
        _databaseConnection = DatabaseProvider.forDialect(
          poolManager.dialect,
@@ -50,13 +45,10 @@ class Database {
   SerializationManagerServer get serializationManager =>
       _databaseConnection.poolManager.serializationManager;
 
-  /// The logger for database operations.
-  final Log log;
-
   /// The analyzer for this database.
   late final analyzer = DatabaseProvider.forDialect(
     dialect,
-  ).createAnalyzer(this, log: log);
+  ).createAnalyzer(this);
 
   /// Returns a list of [TableRow]s matching the given query parameters.
   ///

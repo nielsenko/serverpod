@@ -234,9 +234,9 @@ abstract class EndpointWebsocketRequestHandler {
     StreamingSession? session,
   }) {
     if (message != null) {
-      server.serverpod.log.error(message, error: e, stackTrace: stackTrace);
+      log.error(message, error: e, stackTrace: stackTrace);
     } else {
-      server.serverpod.log.error('$e', error: e, stackTrace: stackTrace);
+      log.error('$e', error: e, stackTrace: stackTrace);
     }
 
     var context = session != null

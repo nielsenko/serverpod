@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:redis/redis.dart';
 import 'package:serverpod/src/server/log_manager/log.dart';
-import 'package:serverpod/src/server/serverpod.dart';
 
 /// Callback when messages are received on a specific channel from Redis.
 typedef RedisSubscriptionCallback =
@@ -84,7 +83,7 @@ class RedisController {
       }
       return command;
     } catch (e, stackTrace) {
-      Serverpod.instance.log.error(
+      log.error(
         'Internal server error. Failed to connect to Redis.',
         error: e,
         stackTrace: stackTrace,
@@ -138,7 +137,7 @@ class RedisController {
       (e, stackTrace) {
         _invalidatePubSub();
 
-        Serverpod.instance.log.error(
+        log.error(
           'Internal server error. Failed to connect to Redis when creating PubSub.',
           error: e,
           stackTrace: stackTrace,

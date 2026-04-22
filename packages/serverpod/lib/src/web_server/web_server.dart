@@ -196,7 +196,7 @@ class WebServer {
 
   /// Logs an error.
   void logError(Object e, {StackTrace? stackTrace}) {
-    serverpod.log.error(
+    log.error(
       'WebServer: $e',
       error: e is Exception ? e : null,
       stackTrace: stackTrace,
@@ -205,12 +205,12 @@ class WebServer {
 
   /// Logs an info message.
   void logInfo(String msg) {
-    serverpod.log.info('WebServer: $msg');
+    log.info('WebServer: $msg');
   }
 
   /// Logs a debug message.
   void logDebug(String msg) {
-    serverpod.log.debug('WebServer: $msg');
+    log.debug('WebServer: $msg');
   }
 
   FutureOr<Result> _devStaticChangeCount(Request _) {

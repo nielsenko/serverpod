@@ -40,7 +40,6 @@ void main() {
       setUp(() async {
         existingMigrations = await ServerMigrationManager(
           Directory.current,
-          log: Log(TestLogWriter()),
         ).listAvailableVersions();
 
         final minimalDefinition =
@@ -93,9 +92,11 @@ void main() {
         'when migrateToLatest is called then logs warning about module name mismatch.',
         () async {
           var testWriter = TestLogWriter();
+          logWriter.add(testWriter);
+          addTearDown(() => logWriter.remove(testWriter));
+
           var migrationManager = ServerMigrationManager(
             Directory(d.sandbox),
-            log: Log(testWriter),
           );
           await migrationManager.migrateToLatest(sessionBuilder.build());
 

@@ -43,10 +43,7 @@ class SqliteDatabaseProvider implements DatabaseProvider {
   }
 
   @override
-  SqliteDatabaseAnalyzer createAnalyzer(
-    Database database, {
-    required Log log,
-  }) {
-    return SqliteDatabaseAnalyzer(database: database, log: log);
+  SqliteDatabaseAnalyzer createAnalyzer(Database database) {
+    return SqliteDatabaseAnalyzer(database: database);
   }
 }

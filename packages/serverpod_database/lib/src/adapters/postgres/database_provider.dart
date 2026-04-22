@@ -41,10 +41,7 @@ class PostgresDatabaseProvider implements DatabaseProvider {
   }
 
   @override
-  PostgresDatabaseAnalyzer createAnalyzer(
-    Database database, {
-    required Log log,
-  }) {
-    return PostgresDatabaseAnalyzer(database: database, log: log);
+  PostgresDatabaseAnalyzer createAnalyzer(Database database) {
+    return PostgresDatabaseAnalyzer(database: database);
   }
 }
