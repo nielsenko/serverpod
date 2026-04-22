@@ -102,7 +102,7 @@ final MultiLogWriter logWriter = MultiLogWriter([]);
 final Log log = Log(logWriter, logLevel: LogLevel.info);
 ```
 
-Both are `final`; their identity never changes after library init. Entry points configure logging by adding writers to `logWriter` (`logWriter.add(myWriter)`), not by replacing the `Log` instance. When a Serverpod shuts down it removes the writers it contributed, so the globals return to a neutral state and the next Serverpod (or a test) starts from a clean chain without any stale isolate-based writers still attached.
+Both are `final`; their identity never changes after library init. Entry points configure logging by adding writers to `logWriter` (`logWriter.add(myWriter)`), not by replacing the `Log` instance. Teardown happens through a `ServerpodLogSetup` handle (see "Writer chains (server)" below) that tracks which writers it added and removes / disposes exactly those, leaving the globals in their pre-install state for the next Serverpod or test.
 
 This model means `log` is genuinely a process-wide global, not a per-`Serverpod` field with a different name. Non-server code (CLI commands, migration tooling, tests) uses the same symbol without depending on the framework runtime. `sessionLog` / `sessionLogWriter` in `packages/serverpod/lib/src/server/log_manager/session_log.dart` follow the same pattern.
 
@@ -185,8 +185,10 @@ class SessionLog {
   Future<void> shutdown();
 }
 
-/// Top-level global. Replaced during Serverpod bootstrap.
-SessionLog sessionLog = SessionLog(MultiSessionLogWriter([]));
+/// Stable globals. Identity never changes after library init - callers
+/// configure the chain by adding writers to [sessionLogWriter].
+final MultiSessionLogWriter sessionLogWriter = MultiSessionLogWriter([]);
+final SessionLog sessionLog = SessionLog(sessionLogWriter);
 ```
 
 ### Why two chains (framework / session)
@@ -222,7 +224,7 @@ Writers live in three tiers:
 
 **`IsolatedLogWriter`** - wraps any `LogWriter` in a dedicated isolate via `IsolatedObject`. The writer factory runs on the isolate so timer-driven spinner animations keep updating even when the calling isolate is blocked.
 
-**`MultiLogWriter`** / **`MultiSessionLogWriter`** - fan out to a mutable list of child writers. Support `add` / `remove` so the chain can be reconfigured after construction (used by the server's two-phase bootstrap; see "Writer chain (server)" below).
+**`MultiLogWriter`** / **`MultiSessionLogWriter`** - fan out to a mutable list of child writers. Support `add` / `remove` so the chain can be reconfigured after construction. Back the global `logWriter` / `sessionLogWriter`; entry points mutate them via `ServerpodLogSetup` (see "Writer chains (server)" below).
 
 #### Server - framework chain (`LogWriter`)
 
@@ -261,37 +263,79 @@ This lets the CLI use any `LogWriter`-based backend (TUI, terminal, …) while p
 
 ### Writer chains (server)
 
-Assembled in two phases by `Serverpod._initializeServerpod` / `_installConfiguredWriters`. Both phases mutate the global `logWriter` / `sessionLogWriter` chains directly; `Serverpod` tracks which writers it contributed (`_ownedLogWriters`, `_ownedSessionLogWriters`) so shutdown can remove and dispose them.
+The global `logWriter` / `sessionLogWriter` chains start empty at library
+init. `ServerpodLogSetup` owns the lifecycle of a set of writers attached
+to them: `installDefaults()` constructs the standard Serverpod bundle,
+`applyConfig(config)` adds the config-dependent session writers once
+[ServerpodConfig] is known, and `close()` removes and disposes exactly
+the writers this setup contributed so the globals return to a clean state.
 
-**Phase 1 - bootstrap** (before config is loaded):
+```dart
+class ServerpodLogSetup {
+  ServerpodLogSetup();                                  // empty
+  static ServerpodLogSetup installDefaults();           // standard bundle
+  DatabaseSessionLogWriter? get databaseWriter;         // for DB session attach
 
-```
-log         -> logWriter (global MultiLogWriter)
-                 -> bootstrapTextWriter  (TextLogWriter or IsolatedLogWriter(TextLogWriter.new))
-                 -> VmServiceLogWriter
+  void addLogWriter(LogWriter writer);
+  void addSessionLogWriter(SessionLogWriter writer);
 
-sessionLog  -> sessionLogWriter (global MultiSessionLogWriter)
-                 -> VmServiceSessionLogWriter
-```
+  @internal
+  void applyConfig(ServerpodConfig config);             // called by Serverpod
 
-Only `bootstrapTextWriter` is tracked in `_bootstrapWriters`. The two VM-service writers stay in the chains until shutdown.
-
-**Phase 2 - after config load**: `_installConfiguredWriters` removes the bootstrap text writer and adds the configured one.
-
-Framework chain (`logWriter`) replaces `bootstrapTextWriter` with a terminal-size-appropriate writer:
-
-```
-+ TextLogWriter | IsolatedLogWriter(TextLogWriter.new)    -- lifecycle, errors, log.info outside a session
-```
-
-Session chain (`sessionLogWriter`) appends the configured echo / persistence writers:
-
-```
-+ TextSessionLogWriter | JsonSessionLogWriter             -- if sessionLogs.consoleEnabled
-+ DatabaseSessionLogWriter                                       -- if sessionLogs.persistentEnabled and non-sqlite
+  Future<void> close();                                 // idempotent
+}
 ```
 
-The VM-service writers remain until shutdown. On shutdown, `Serverpod._removeOwnedWriters` flushes both chains, removes each writer this Serverpod added, and `close()` / `dispose()`s them so isolate-based writers release their isolates. The globals themselves are never closed - the next Serverpod (or test) sees a clean chain.
+`installDefaults()` installs the framework- and session-chain writers that
+don't depend on config:
+
+```
+logWriter        += TextLogWriter | IsolatedLogWriter(TextLogWriter.new)
+                 += VmServiceLogWriter
+
+sessionLogWriter += VmServiceSessionLogWriter
+```
+
+`applyConfig(config)` then appends, based on `config.sessionLogs`:
+
+```
+sessionLogWriter += TextSessionLogWriter | JsonSessionLogWriter   -- if consoleEnabled
+sessionLogWriter += DatabaseSessionLogWriter                       -- if persistentEnabled and non-sqlite
+```
+
+`close()` flushes both chains, removes every tracked writer in reverse of
+`add` order, and `close()` / `dispose()`s them so isolate-based writers
+release their isolates. The global `Log` / `SessionLog` instances and
+their MultiWriters themselves are never closed - the next Serverpod or
+the next test sees a clean chain.
+
+#### Ownership
+
+Entry points (typically `main.dart` or a test harness) own the setup:
+
+```dart
+void main(List<String> args) async {
+  final setup = ServerpodLogSetup.installDefaults();
+  try {
+    final pod = Serverpod(args, Protocol(), Endpoints(), loggingSetup: setup);
+    await pod.run();
+  } finally {
+    await setup.close();
+  }
+}
+```
+
+`Serverpod`'s `loggingSetup:` parameter is optional. When omitted,
+`Serverpod` calls `installDefaults()` internally and closes the setup on
+shutdown - same behaviour as the explicit pattern, but the "who owns
+teardown" signal is lost. Tests that need a custom chain construct a
+setup directly (`ServerpodLogSetup()..addLogWriter(TestLogWriter())`) and
+pass it in.
+
+`Serverpod` itself makes exactly two calls against the setup: it invokes
+`applyConfig(config)` once, after its own config load, and
+`databaseWriter?.attach(internalSession)` once the database pool is up.
+Every other mutation of the global chains happens through the setup.
 
 ### Writer chain (CLI)
 
