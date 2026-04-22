@@ -211,7 +211,7 @@ abstract class Session implements DatabaseSession {
       );
     } catch (e, stackTrace) {
       shared.log.error(
-        'Failed to close session: $e',
+        'Failed to close session',
         error: e,
         stackTrace: stackTrace,
       );

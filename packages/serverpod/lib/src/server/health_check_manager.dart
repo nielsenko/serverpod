@@ -439,11 +439,11 @@ class HealthCheckManager {
     StackTrace stackTrace, {
     String? message,
   }) {
-    if (message != null) {
-      log.error(message, error: e, stackTrace: stackTrace);
-    } else {
-      log.error('$e', error: e, stackTrace: stackTrace);
-    }
+    log.error(
+      message ?? 'Unhandled exception',
+      error: e,
+      stackTrace: stackTrace,
+    );
 
     _pod.internalSubmitEvent(
       ExceptionEvent(e, stackTrace, message: message),

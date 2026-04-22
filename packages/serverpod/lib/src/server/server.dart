@@ -578,11 +578,11 @@ class Server implements RouterInjectable {
     Request? request,
     OperationType? operationType,
   }) async {
-    if (message != null) {
-      log.error(message, error: e, stackTrace: stackTrace);
-    } else {
-      log.error('$e', error: e, stackTrace: stackTrace);
-    }
+    log.error(
+      message ?? 'Unhandled exception',
+      error: e,
+      stackTrace: stackTrace,
+    );
 
     var context = request != null
         ? contextFromRequest(this, request, operationType)

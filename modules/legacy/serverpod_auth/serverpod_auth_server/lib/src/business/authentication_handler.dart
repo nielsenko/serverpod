@@ -46,7 +46,8 @@ Future<AuthenticationInfo?> authenticationHandler(
     );
   } catch (exception, stackTrace) {
     log.error(
-      'Failed authentication: $exception',
+      'Failed authentication',
+      error: exception,
       stackTrace: stackTrace,
     );
     return null;

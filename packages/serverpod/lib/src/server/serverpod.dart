@@ -1361,8 +1361,11 @@ class Serverpod {
     StackTrace stackTrace, {
     String? message,
   }) {
-    var errorMessage = message != null ? '$message: $e' : '$e';
-    log.error(errorMessage, error: e, stackTrace: stackTrace);
+    log.error(
+      message ?? 'Unhandled exception',
+      error: e,
+      stackTrace: stackTrace,
+    );
 
     internalSubmitEvent(
       ExceptionEvent(e, stackTrace, message: message),

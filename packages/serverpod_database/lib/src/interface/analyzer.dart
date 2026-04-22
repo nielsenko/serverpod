@@ -68,7 +68,7 @@ abstract class DatabaseAnalyzer {
       ];
     } catch (e) {
       // Ignore if the table does not exist.
-      log.error('Failed to get installed migrations: $e');
+      log.error('Failed to get installed migrations', error: e);
       return [];
     }
   }

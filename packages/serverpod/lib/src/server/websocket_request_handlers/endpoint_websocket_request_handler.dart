@@ -233,11 +233,11 @@ abstract class EndpointWebsocketRequestHandler {
     Request? request,
     StreamingSession? session,
   }) {
-    if (message != null) {
-      log.error(message, error: e, stackTrace: stackTrace);
-    } else {
-      log.error('$e', error: e, stackTrace: stackTrace);
-    }
+    log.error(
+      message ?? 'Unhandled exception',
+      error: e,
+      stackTrace: stackTrace,
+    );
 
     var context = session != null
         ? contextFromSession(session, request: request)

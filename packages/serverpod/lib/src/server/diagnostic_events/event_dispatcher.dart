@@ -42,11 +42,11 @@ class DiagnosticEventDispatcher implements DiagnosticEventHandler {
       if (errors is Iterable<AsyncError?>) {
         for (var error in errors) {
           if (error != null) {
-            log.error('Error in event handler: $error');
+            log.error('Error in event handler', error: error);
           }
         }
       } else {
-        log.error('Error in an event handler: $errors');
+        log.error('Error in event handler', error: errors);
       }
       return e.values;
     });
