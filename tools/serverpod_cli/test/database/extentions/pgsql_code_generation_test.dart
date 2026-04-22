@@ -656,4 +656,95 @@ END
       },
     );
   });
+
+  group('Given a table definition with a gin index', () {
+    var modelName = 'myModel';
+    var fieldName = 'jdoc';
+    var models = [
+      ModelClassDefinitionBuilder()
+          .withClassName(modelName.sentenceCase)
+          .withFileName(modelName)
+          .withTableName(modelName)
+          .withListField(
+            fieldName,
+            'List',
+          )
+          .build(),
+    ];
+
+    var databaseDefinition = createDatabaseDefinitionFromModels(
+      models,
+      'example',
+      [],
+    );
+    var tableDefinition = databaseDefinition.tables.first;
+
+    test(
+      'when creating a gin index without an explicit operator class, then the SQL uses USING gin without an operator class suffix.',
+      () {
+        var indexName = '${modelName}_jsonb_idx';
+        var index = IndexDefinitionBuilder()
+            .withIndexName(indexName)
+            .withElements([
+              IndexElementDefinition(
+                type: IndexElementDefinitionType.column,
+                definition: fieldName,
+              ),
+            ])
+            .withType('gin')
+            .withIsUnique(false)
+            .withIsPrimary(false)
+            .build();
+
+        var sql = index.toPgSql(tableName: tableDefinition.name);
+
+        expect(
+          sql,
+          'CREATE INDEX "$indexName" ON "${tableDefinition.name}" '
+          'USING gin ("$fieldName");\n',
+        );
+      },
+    );
+
+    test(
+      'when creating gin indexes with different operator classes, '
+      'then the SQL uses USING gin with the correct operator class suffix.',
+      () {
+        var operatorClasses = {
+          GinOperatorClass.arrayOps: 'array_ops',
+          GinOperatorClass.jsonbOps: 'jsonb_ops',
+          GinOperatorClass.jsonbPathOps: 'jsonb_path_ops',
+          GinOperatorClass.tsvectorOps: 'tsvector_ops',
+        };
+
+        for (var entry in operatorClasses.entries) {
+          var operatorClass = entry.key;
+          var expectedSuffix = entry.value;
+          var indexName = '${modelName}_jsonb_idx_$operatorClass';
+
+          var index = IndexDefinitionBuilder()
+              .withIndexName(indexName)
+              .withElements([
+                IndexElementDefinition(
+                  type: IndexElementDefinitionType.column,
+                  definition: fieldName,
+                ),
+              ])
+              .withType('gin')
+              .withGinOperatorClass(operatorClass)
+              .withIsUnique(false)
+              .withIsPrimary(false)
+              .build();
+
+          var sql = index.toPgSql(tableName: tableDefinition.name);
+
+          expect(
+            sql,
+            'CREATE INDEX "$indexName" ON "${tableDefinition.name}" '
+            'USING gin ("$fieldName" $expectedSuffix);\n',
+          );
+        }
+      },
+    );
+  });
 }
