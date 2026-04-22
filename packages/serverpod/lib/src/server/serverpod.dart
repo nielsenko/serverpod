@@ -3,13 +3,7 @@ import 'dart:io';
 
 import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
-import 'package:serverpod_shared/log_io.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/database_session_log_writer.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/json_session_log_writer.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/text_session_log_writer.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/vm_service_log_writer.dart';
-import 'package:serverpod/src/server/log_manager/log_writers/vm_service_session_log_writer.dart';
 import 'package:serverpod/src/server/log_manager/session_log.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
@@ -43,28 +37,13 @@ typedef HealthCheckHandler =
 class Serverpod {
   static Serverpod? _instance;
 
-  /// Writers this [Serverpod] added to the global [logWriter]. Tracked so
-  /// shutdown can remove them and leave the global chain in whatever
-  /// state non-Serverpod code expects.
-  final List<LogWriter> _ownedLogWriters = [];
-
-  /// Writers this [Serverpod] added to the global [sessionLogWriter].
-  /// Tracked so shutdown can remove them.
-  final List<SessionLogWriter> _ownedSessionLogWriters = [];
-
-  /// The text writer installed in [logWriter] before config is loaded,
-  /// so bootstrap lifecycle output has somewhere to go. Swapped out of
-  /// [logWriter] in [_installConfiguredWriters] once [config.sessionLogs]
-  /// is known, but stays in [_ownedLogWriters] so shutdown can close it
-  /// and release its isolate.
-  LogWriter? _bootstrapTextWriter;
-
-  /// Late-attached writer that persists session logs to the database.
-  /// Set when [config.sessionLogs.persistentEnabled] is true and the
-  /// dialect is not sqlite. Created (unattached) before the database
-  /// is up; receives its [Session] once [_internalSession] is
-  /// available.
-  DatabaseSessionLogWriter? _databaseLogWriter;
+  /// The [ServerpodLogSetup] driving this Serverpod's log output. Either
+  /// passed in by the caller (preferred) or lazily constructed via
+  /// [ServerpodLogSetup.installDefaults]. When Serverpod constructed it,
+  /// shutdown closes it; when the caller passed one in, the caller
+  /// owns [ServerpodLogSetup.close].
+  final ServerpodLogSetup _loggingSetup;
+  final bool _ownsLoggingSetup;
 
   late Session _internalSession;
 
@@ -91,100 +70,6 @@ class Serverpod {
     if (_shouldPrintLifecycleMessages) {
       log.info(message);
     }
-  }
-
-  /// Replaces the bootstrap writer chain with the one selected by
-  /// [config.sessionLogs]. Called once during construction after config
-  /// has been loaded. All mutation happens on the globals ([logWriter],
-  /// [sessionLogWriter]); the added writers are tracked on the instance
-  /// so shutdown can remove them again.
-  ///
-  /// Two independent chains are assembled:
-  ///
-  /// - **Framework** ([logWriter]): receives lifecycle banners, errors,
-  ///   and any other `log.info(...)` calls made outside a session. The
-  ///   bootstrap [TextLogWriter] is swapped for a
-  ///   `TextLogWriter` / `IsolatedLogWriter(TextLogWriter.new)`, and
-  ///   the always-present [VmServiceLogWriter] remains.
-  /// - **Session** ([sessionLogWriter]): receives typed session events
-  ///   from `SessionLogManager`. Gets a session-echo writer (legacy
-  ///   text columns or JSON) when `sessionLogs.consoleEnabled`, a
-  ///   [DatabaseSessionLogWriter] when persistence is configured, and the
-  ///   always-present [VmServiceSessionLogWriter] so the CLI sees
-  ///   session events on the same `ext.serverpod.log` wire channel as
-  ///   framework events.
-  void _installConfiguredWriters() {
-    final sessionLogs = config.sessionLogs;
-
-    final frameworkTextWriter = stdout.hasTerminal
-        ? IsolatedLogWriter(TextLogWriter.new)
-        : TextLogWriter();
-
-    // Remove the bootstrap text writer from the live chain but leave it
-    // in [_ownedLogWriters] so shutdown closes it and releases its
-    // isolate. Post-swap it stays idle; close() during [_removeOwnedWriters]
-    // is what actually frees it.
-    if (_bootstrapTextWriter != null) {
-      logWriter.remove(_bootstrapTextWriter!);
-      _bootstrapTextWriter = null;
-    }
-
-    _addLogWriter(frameworkTextWriter);
-
-    if (sessionLogs.consoleEnabled) {
-      final sessionEchoWriter = switch (sessionLogs.consoleLogFormat) {
-        ConsoleLogFormat.text => TextSessionLogWriter(),
-        ConsoleLogFormat.json => JsonSessionLogWriter(),
-      };
-      _addSessionLogWriter(sessionEchoWriter);
-    }
-
-    final dbConfig = config.database;
-    if (sessionLogs.persistentEnabled &&
-        dbConfig != null &&
-        dbConfig.dialect != DatabaseDialect.sqlite) {
-      _databaseLogWriter = DatabaseSessionLogWriter();
-      // Not tracked in [_ownedSessionLogWriters]; disposed separately
-      // during shutdown before the database pool stops, because its
-      // drain needs a live DB connection.
-      sessionLogWriter.add(_databaseLogWriter!);
-    }
-  }
-
-  void _addLogWriter(LogWriter writer) {
-    logWriter.add(writer);
-    _ownedLogWriters.add(writer);
-  }
-
-  void _addSessionLogWriter(SessionLogWriter writer) {
-    sessionLogWriter.add(writer);
-    _ownedSessionLogWriters.add(writer);
-  }
-
-  /// Flushes the global chains, removes this Serverpod's writers, and
-  /// closes each of them so isolate-based writers don't keep the
-  /// process alive. The globals ([log], [sessionLog], [logWriter],
-  /// [sessionLogWriter]) remain usable afterwards - only the writers
-  /// this instance contributed are torn down.
-  Future<void> _removeOwnedWriters() async {
-    await (log.flush(), sessionLog.flush()).wait;
-
-    final logOwned = List.of(_ownedLogWriters);
-    _ownedLogWriters.clear();
-    final sessionOwned = List.of(_ownedSessionLogWriters);
-    _ownedSessionLogWriters.clear();
-
-    for (final w in logOwned) {
-      logWriter.remove(w);
-    }
-    for (final w in sessionOwned) {
-      sessionLogWriter.remove(w);
-    }
-
-    await [
-      ...logOwned.map((w) => w.close()),
-      ...sessionOwned.map((w) => w.dispose()),
-    ].wait;
   }
 
   /// The last created [Serverpod]. In most cases the [Serverpod] is a singleton
@@ -546,12 +431,15 @@ class Serverpod {
     SecurityContextConfig? securityContextConfig,
     ExperimentalFeatures? experimentalFeatures,
     this.runtimeParametersBuilder,
+    ServerpodLogSetup? loggingSetup,
   }) : httpResponseHeaders = httpResponseHeaders ?? _defaultHttpResponseHeaders,
        httpOptionsResponseHeaders =
            httpOptionsResponseHeaders ?? _defaultHttpOptionsResponseHeaders,
        _configOverride = configOverride,
        _securityContextConfig = securityContextConfig,
        _healthConfig = healthConfig ?? const HealthConfig(),
+       _loggingSetup = loggingSetup ?? ServerpodLogSetup.installDefaults(),
+       _ownsLoggingSetup = loggingSetup == null,
        _experimental = ExperimentalApi._(
          config: config,
          experimentalFeatures: experimentalFeatures,
@@ -584,11 +472,22 @@ class Serverpod {
         log.error(message);
       }
       try {
-        await _removeOwnedWriters();
+        await _drainLogging();
         await (stdout.flush(), stderr.flush()).wait;
       } catch (_) {}
       exit(code);
     }();
+  }
+
+  /// Drains the log chains. If this Serverpod owns [_loggingSetup],
+  /// also removes and disposes the writers it added; otherwise only
+  /// flushes, leaving teardown to whoever owns the setup.
+  Future<void> _drainLogging() async {
+    if (_ownsLoggingSetup) {
+      await _loggingSetup.close();
+    } else {
+      await (log.flush(), sessionLog.flush()).wait;
+    }
   }
 
   void _initializeServerpod(
@@ -599,19 +498,6 @@ class Serverpod {
     // touches (e.g. CommandLineArgs warning on parse failure) can reach
     // [Serverpod.instance].
     _instance = this;
-
-    // Populate the global [logWriter] / [sessionLogWriter] chains early so
-    // _writeLifecycleMessage works immediately. The bootstrap text writer
-    // is swapped out in [_installConfiguredWriters] once config is loaded;
-    // the VM-service writers stay for the process lifetime. All
-    // additions are tracked so [_removeOwnedWriters] can undo them on
-    // shutdown, leaving the globals in their pre-Serverpod state.
-    _bootstrapTextWriter = stdout.hasTerminal
-        ? IsolatedLogWriter(TextLogWriter.new)
-        : TextLogWriter();
-    _addLogWriter(_bootstrapTextWriter!);
-    _addLogWriter(VmServiceLogWriter());
-    _addSessionLogWriter(VmServiceSessionLogWriter());
 
     _writeLifecycleMessage(
       'SERVERPOD version: $serverpodVersion, dart: ${Platform.version}, time: ${DateTime.now().toUtc()}',
@@ -682,12 +568,10 @@ class Serverpod {
       log.logLevel = LogLevel.debug;
     }
 
-    // Now that config is loaded, replace the bootstrap writers with the
-    // configured chain: a framework writer that ignores session scopes,
-    // an optional session-echo writer (text or json, gated by
-    // sessionLogs.consoleEnabled), VmServiceLogWriter, and the
-    // DatabaseSessionLogWriter when persistent logging is enabled.
-    _installConfiguredWriters();
+    // Now that config is loaded, let the logging setup add the
+    // config-dependent session writers (text / json echo and the
+    // database persistence writer).
+    _loggingSetup.applyConfig(this.config);
 
     _writeLifecycleMessage(_getCommandLineArgsString());
 
@@ -787,7 +671,7 @@ class Serverpod {
 
     // Attach the internal session to the database log writer (if installed)
     // now that the database pool is up and a Session can be constructed.
-    _databaseLogWriter?.attach(_internalSession);
+    _loggingSetup.databaseWriter?.attach(_internalSession);
     _internalLoggingSession = InternalSession(
       server: server,
       enableLogging: true,
@@ -1395,11 +1279,13 @@ class Serverpod {
 
     // Drain the database log writer before tearing the pool down so its
     // in-flight close rows reach the database instead of racing pool.stop().
+    // Dispose is idempotent; if the caller owns the log setup and later
+    // closes it, the duplicate dispose is a no-op.
     try {
-      if (_databaseLogWriter != null) {
-        sessionLogWriter.remove(_databaseLogWriter!);
-        await _databaseLogWriter!.dispose();
-        _databaseLogWriter = null;
+      final dbWriter = _loggingSetup.databaseWriter;
+      if (dbWriter != null) {
+        sessionLogWriter.remove(dbWriter);
+        await dbWriter.dispose();
       }
     } catch (e, stackTrace) {
       shutdownError = e;
@@ -1426,12 +1312,12 @@ class Serverpod {
       'SERVERPOD shutdown completed, time: ${DateTime.now().toUtc()}',
     );
 
-    // Drain and remove this Serverpod's writers from the global chains.
-    // On non-terminals (docker pipes, redirects) stdout is block-buffered
-    // and [exit] does not drain it, so flush before exit.
-    await _removeOwnedWriters();
+    await _drainLogging();
 
     if (exitProcess) {
+      // On non-terminals (docker pipes, redirects) stdout is
+      // block-buffered and [exit] does not drain it, so flush
+      // explicitly before exiting.
       await stdout.flush().catchError((_) {});
       await stderr.flush().catchError((_) {});
 
