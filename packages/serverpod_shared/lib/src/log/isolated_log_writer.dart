@@ -1,4 +1,4 @@
-import 'isolated_object.dart';
+import '../utils/isolated_object.dart';
 import 'log_types.dart';
 
 /// A [LogWriter] that wraps any [LogWriter] in a dedicated isolate.
