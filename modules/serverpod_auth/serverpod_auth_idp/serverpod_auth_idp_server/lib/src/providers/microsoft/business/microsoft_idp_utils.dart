@@ -334,7 +334,7 @@ class MicrosoftIdpUtils {
 
 extension on Session {
   Never logAndThrow(final String message) {
-    this.log(message, level: LogLevel.debug);
+    log(message, level: LogLevel.debug);
     throw MicrosoftAccessTokenVerificationException();
   }
 }
