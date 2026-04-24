@@ -102,7 +102,7 @@ final MultiLogWriter logWriter = MultiLogWriter([]);
 final Log log = Log(logWriter, logLevel: LogLevel.info);
 ```
 
-Both are `final`; their identity never changes after library init. Entry points configure logging by adding writers to `logWriter` (`logWriter.add(myWriter)`), not by replacing the `Log` instance. Teardown happens through a `ServerpodLogSetup` handle (see "Writer chains (server)" below) that tracks which writers it added and removes / disposes exactly those, leaving the globals in their pre-install state for the next Serverpod or test.
+Both are `final`; their identity never changes after library init. Entry points configure logging by adding writers to `logWriter` (`logWriter.add(myWriter)`), not by replacing the `Log` instance. `Serverpod` teardown happens through an internal `ServerpodLogSetup` handle (see "Writer chains (server)" below) that tracks which writers it added and removes / disposes exactly those, leaving the globals in their pre-install state for the next Serverpod or test.
 
 This model means `log` is genuinely a process-wide global, not a per-`Serverpod` field with a different name. Non-server code (CLI commands, migration tooling, tests) uses the same symbol without depending on the framework runtime. `sessionLog` / `sessionLogWriter` in `packages/serverpod/lib/src/server/log_manager/session_log.dart` follow the same pattern.
 
@@ -224,7 +224,7 @@ Writers live in three tiers:
 
 **`IsolatedLogWriter`** - wraps any `LogWriter` in a dedicated isolate via `IsolatedObject`. The writer factory runs on the isolate so timer-driven spinner animations keep updating even when the calling isolate is blocked.
 
-**`MultiLogWriter`** / **`MultiSessionLogWriter`** - fan out to a mutable list of child writers. Support `add` / `remove` so the chain can be reconfigured after construction. Back the global `logWriter` / `sessionLogWriter`; entry points mutate them via `ServerpodLogSetup` (see "Writer chains (server)" below).
+**`MultiLogWriter`** / **`MultiSessionLogWriter`** - fan out to a mutable list of child writers. Support `add` / `remove` so the chain can be reconfigured after construction. Back the global `logWriter` / `sessionLogWriter`; `Serverpod` installs its defaults via `ServerpodLogSetup` (see "Writer chains (server)" below) and anything else - tests, CLI tooling - adds or removes writers directly.
 
 #### Server - framework chain (`LogWriter`)
 
@@ -311,28 +311,23 @@ the next test sees a clean chain.
 
 #### Ownership
 
-Entry points (typically `main.dart` or a test harness) own the setup:
+`Serverpod` owns its `ServerpodLogSetup` - it constructs one via
+`installDefaults()` during its own construction and calls `close()` on
+shutdown. Entry points don't need to pass anything in:
 
 ```dart
 void main(List<String> args) async {
-  final setup = ServerpodLogSetup.installDefaults();
-  try {
-    final pod = Serverpod(args, Protocol(), Endpoints(), loggingSetup: setup);
-    await pod.run();
-  } finally {
-    await setup.close();
-  }
+  final pod = Serverpod(args, Protocol(), Endpoints());
+  await pod.run();
 }
 ```
 
-`Serverpod`'s `loggingSetup:` parameter is optional. When omitted,
-`Serverpod` calls `installDefaults()` internally and closes the setup on
-shutdown - same behaviour as the explicit pattern, but the "who owns
-teardown" signal is lost. Tests that need a custom chain construct a
-setup directly (`ServerpodLogSetup()..addLogWriter(TestLogWriter())`) and
-pass it in.
+Tests that need to observe or silence specific log output add writers to
+the global `logWriter` / `sessionLogWriter` chains directly before
+constructing `Serverpod`; those writers coexist with the defaults
+`Serverpod` installs and are the test's responsibility to remove.
 
-`Serverpod` itself makes exactly two calls against the setup: it invokes
+`Serverpod` itself makes exactly two calls against its setup: it invokes
 `applyConfig(config)` once, after its own config load, and
 `databaseWriter?.attach(internalSession)` once the database pool is up.
 Every other mutation of the global chains happens through the setup.

@@ -37,13 +37,10 @@ typedef HealthCheckHandler =
 class Serverpod {
   static Serverpod? _instance;
 
-  /// The [ServerpodLogSetup] driving this Serverpod's log output. Either
-  /// passed in by the caller (preferred) or lazily constructed via
-  /// [ServerpodLogSetup.installDefaults]. When Serverpod constructed it,
-  /// shutdown closes it; when the caller passed one in, the caller
-  /// owns [ServerpodLogSetup.close].
-  final ServerpodLogSetup _loggingSetup;
-  final bool _ownsLoggingSetup;
+  /// The [ServerpodLogSetup] driving this Serverpod's log output,
+  /// constructed via [ServerpodLogSetup.installDefaults]. Shutdown
+  /// closes it.
+  final ServerpodLogSetup _loggingSetup = ServerpodLogSetup.installDefaults();
 
   late Session _internalSession;
 
@@ -431,15 +428,12 @@ class Serverpod {
     SecurityContextConfig? securityContextConfig,
     ExperimentalFeatures? experimentalFeatures,
     this.runtimeParametersBuilder,
-    ServerpodLogSetup? loggingSetup,
   }) : httpResponseHeaders = httpResponseHeaders ?? _defaultHttpResponseHeaders,
        httpOptionsResponseHeaders =
            httpOptionsResponseHeaders ?? _defaultHttpOptionsResponseHeaders,
        _configOverride = configOverride,
        _securityContextConfig = securityContextConfig,
        _healthConfig = healthConfig ?? const HealthConfig(),
-       _loggingSetup = loggingSetup ?? ServerpodLogSetup.installDefaults(),
-       _ownsLoggingSetup = loggingSetup == null,
        _experimental = ExperimentalApi._(
          config: config,
          experimentalFeatures: experimentalFeatures,
@@ -479,15 +473,10 @@ class Serverpod {
     }();
   }
 
-  /// Drains the log chains. If this Serverpod owns [_loggingSetup],
-  /// also removes and disposes the writers it added; otherwise only
-  /// flushes, leaving teardown to whoever owns the setup.
+  /// Drains the log chains and disposes the writers [_loggingSetup]
+  /// added.
   Future<void> _drainLogging() async {
-    if (_ownsLoggingSetup) {
-      await _loggingSetup.close();
-    } else {
-      await (log.flush(), sessionLog.flush()).wait;
-    }
+    await _loggingSetup.close();
   }
 
   void _initializeServerpod(
