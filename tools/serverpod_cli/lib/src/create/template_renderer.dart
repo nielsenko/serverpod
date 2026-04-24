@@ -17,7 +17,11 @@ class TemplateRenderer {
 
   /// Renders the templates in the target directory using [context].
   Future<void> render(TemplateContext context) async {
-    await _renderDirectory(dir, context);
+    try {
+      await _renderDirectory(dir, context);
+    } on FileSystemException {
+      // Directory gone.
+    }
   }
 
   /// Recursively renders all files and directories within the specified directory.
@@ -31,25 +35,32 @@ class TemplateRenderer {
       if (entry is File) {
         await _renderFile(entry, context);
       } else if (entry is Directory) {
-        final renderedName = _renderFileSystemEntityName(
-          p.basename(entry.path),
-          context,
-        );
-        final newPath = p.join(p.dirname(entry.path), renderedName);
-
-        if (renderedName.isEmpty) {
-          await _deleteDirectory(entry);
-        } else if (newPath != entry.path) {
-          try {
-            await entry.rename(newPath);
-            await _renderDirectory(Directory(newPath), context);
-          } on FileSystemException {
-            // Directory gone.
-          }
-        } else {
-          await _renderDirectory(entry, context);
-        }
+        await _handleDirectoryRendering(entry, context);
       }
+    }
+  }
+
+  Future<void> _handleDirectoryRendering(
+    Directory directory,
+    TemplateContext context,
+  ) async {
+    try {
+      final renderedName = _renderFileSystemEntityName(
+        p.basename(directory.path),
+        context,
+      );
+      final newPath = p.join(p.dirname(directory.path), renderedName);
+
+      if (renderedName.isEmpty) {
+        await directory.delete(recursive: true);
+      } else if (newPath != directory.path) {
+        await directory.rename(newPath);
+        await _renderDirectory(Directory(newPath), context);
+      } else {
+        await _renderDirectory(directory, context);
+      }
+    } on FileSystemException {
+      // Directory gone.
     }
   }
 
@@ -145,13 +156,5 @@ class TemplateRenderer {
       name.replaceAll(r'{{!', '{{/'),
       context,
     ).replaceAll(RegExp(r'\{\{/ ?\}\}'), '');
-  }
-
-  Future<void> _deleteDirectory(Directory dir) async {
-    try {
-      await dir.delete(recursive: true);
-    } on FileSystemException {
-      // Directory gone.
-    }
   }
 }

@@ -55,7 +55,7 @@ redis:
 # {{/redis}}
 
 sessionLogs:
-  # {{#database}}
+  # {{#postgres}}
   persistentEnabled: true
-  # {{/database}}
+  # {{/postgres}}
   consoleEnabled: true
