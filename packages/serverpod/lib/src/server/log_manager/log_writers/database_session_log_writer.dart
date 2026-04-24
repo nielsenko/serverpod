@@ -71,7 +71,7 @@ class DatabaseSessionLogWriter extends SessionLogWriter {
 
   Future<int> _insertOpenRow(Session session, SessionOpen event) async {
     final row = _buildOpenRow(event);
-    final inserted = await session.db.insertRow<protocol.SessionLogEntry>(row);
+    final inserted = await protocol.SessionLogEntry.db.insertRow(session, row);
     final id = inserted.id;
     if (id == null) {
       throw StateError('SessionLogEntry insert returned null id');
@@ -103,16 +103,19 @@ class DatabaseSessionLogWriter extends SessionLogWriter {
 
     switch (entry) {
       case SessionLogEntry e:
-        await session.db.insertRow<protocol.LogEntry>(
+        await protocol.LogEntry.db.insertRow(
+          session,
           _buildLogRow(e, sessionLogId, state.open),
         );
       case SessionQueryEntry e:
         state.queryCount++;
-        await session.db.insertRow<protocol.QueryLogEntry>(
+        await protocol.QueryLogEntry.db.insertRow(
+          session,
           _buildQueryRow(e, sessionLogId, state.open),
         );
       case SessionMessageEntry e:
-        await session.db.insertRow<protocol.MessageLogEntry>(
+        await protocol.MessageLogEntry.db.insertRow(
+          session,
           _buildMessageRow(e, sessionLogId, state.open),
         );
     }
@@ -141,7 +144,7 @@ class DatabaseSessionLogWriter extends SessionLogWriter {
     }
 
     final row = _buildCloseRow(state.open, event, sessionLogId);
-    await session.db.updateRow<protocol.SessionLogEntry>(row);
+    await protocol.SessionLogEntry.db.updateRow(session, row);
   }
 
   Future<T> _track<T>(Future<T> work) async {
