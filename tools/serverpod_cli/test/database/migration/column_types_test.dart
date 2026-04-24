@@ -60,25 +60,23 @@ void main() {
         databaseTarget: targetDefinition,
       );
 
-      // The migration engine does not support in-place ALTER COLUMN TYPE for
-      // json/jsonb, so the table is dropped and recreated. The destructive
-      // warnings abort `serverpod create-migration` unless --force is used.
-      test(
-        'then the table is dropped and recreated with destructive warnings.',
-        () {
-          expect(migration.actions, hasLength(2));
-          expect(
-            migration.actions.first.type,
-            DatabaseMigrationActionType.deleteTable,
-          );
-          expect(
-            migration.actions.last.type,
-            DatabaseMigrationActionType.createTable,
-          );
-          expect(migration.warnings, isNotEmpty);
-          expect(migration.warnings.every((w) => w.destructive), isTrue);
-        },
-      );
+      test('then one alter table action is created.', () {
+        expect(migration.actions, hasLength(1));
+        expect(
+          migration.actions.first.type,
+          DatabaseMigrationActionType.alterTable,
+        );
+      });
+
+      test('then the alter action has a column type change to jsonb.', () {
+        var modifyColumns = migration.actions.first.alterTable!.modifyColumns;
+        expect(modifyColumns, hasLength(1));
+        expect(modifyColumns.first.newType, ColumnType.jsonb);
+      });
+
+      test('then no warnings are created.', () {
+        expect(migration.warnings, isEmpty);
+      });
     },
   );
 
@@ -93,25 +91,67 @@ void main() {
         databaseTarget: targetDefinition,
       );
 
-      // The migration engine does not support in-place ALTER COLUMN TYPE for
-      // json/jsonb, so the table is dropped and recreated. The destructive
-      // warnings abort `serverpod create-migration` unless --force is used.
-      test(
-        'then the table is dropped and recreated with destructive warnings.',
-        () {
-          expect(migration.actions, hasLength(2));
-          expect(
-            migration.actions.first.type,
-            DatabaseMigrationActionType.deleteTable,
-          );
-          expect(
-            migration.actions.last.type,
-            DatabaseMigrationActionType.createTable,
-          );
-          expect(migration.warnings, isNotEmpty);
-          expect(migration.warnings.every((w) => w.destructive), isTrue);
-        },
+      test('then one alter table action is created.', () {
+        expect(migration.actions, hasLength(1));
+        expect(
+          migration.actions.first.type,
+          DatabaseMigrationActionType.alterTable,
+        );
+      });
+
+      test('then the alter action has a column type change to json.', () {
+        var modifyColumns = migration.actions.first.alterTable!.modifyColumns;
+        expect(modifyColumns, hasLength(1));
+        expect(modifyColumns.first.newType, ColumnType.json);
+      });
+
+      test('then no warnings are created.', () {
+        expect(migration.warnings, isEmpty);
+      });
+    },
+  );
+
+  group(
+    'Given table with non-nullable json column as source and nullable jsonb column as target',
+    () {
+      var sourceDefinition = _singleColumnDatabaseDefinition(ColumnType.json);
+      var sourceTable = sourceDefinition.tables.first;
+      var sourceColumn = sourceTable.columns.firstWhere(
+        (c) => c.name == 'test_column',
       );
+      var targetDefinition = sourceDefinition.copyWith(
+        tables: [
+          sourceTable.copyWith(
+            columns: sourceTable.columns
+                .map(
+                  (c) => c == sourceColumn
+                      ? c.copyWith(
+                          columnType: ColumnType.jsonb,
+                          isNullable: true,
+                        )
+                      : c,
+                )
+                .toList(),
+          ),
+        ],
+      );
+
+      var migration = generateDatabaseMigration(
+        databaseSource: sourceDefinition,
+        databaseTarget: targetDefinition,
+      );
+
+      test('then one alter table action is created.', () {
+        expect(migration.actions, hasLength(1));
+        expect(
+          migration.actions.first.type,
+          DatabaseMigrationActionType.alterTable,
+        );
+      });
+
+      test('then no warnings are created.', () {
+        expect(migration.warnings, isEmpty);
+      });
     },
   );
 }
