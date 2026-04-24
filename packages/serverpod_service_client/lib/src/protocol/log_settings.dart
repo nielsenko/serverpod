@@ -11,7 +11,7 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
-import 'log_level.dart' as _i2;
+import 'package:serverpod_shared/log.dart' as _i2;
 
 /// Log settings for the server.
 abstract class LogSettings implements _i1.SerializableModel {
@@ -43,7 +43,7 @@ abstract class LogSettings implements _i1.SerializableModel {
 
   factory LogSettings.fromJson(Map<String, dynamic> jsonSerialization) {
     return LogSettings(
-      logLevel: _i2.LogLevel.fromJson((jsonSerialization['logLevel'] as int)),
+      logLevel: _i2.LogLevel.fromJson(jsonSerialization['logLevel']),
       logAllSessions: _i1.BoolJsonExtension.fromJson(
         jsonSerialization['logAllSessions'],
       ),
@@ -183,7 +183,7 @@ class _LogSettingsImpl extends LogSettings {
     double? slowQueryDuration,
   }) {
     return LogSettings(
-      logLevel: logLevel ?? this.logLevel,
+      logLevel: logLevel ?? this.logLevel.copyWith(),
       logAllSessions: logAllSessions ?? this.logAllSessions,
       logAllQueries: logAllQueries ?? this.logAllQueries,
       logSlowSessions: logSlowSessions ?? this.logSlowSessions,

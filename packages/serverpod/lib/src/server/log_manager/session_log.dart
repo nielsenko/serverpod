@@ -1,9 +1,6 @@
 import 'dart:async';
 
-import 'package:meta/meta.dart';
-import 'package:serverpod_shared/log.dart' show LogLevel;
-
-import '../../generated/protocol.dart' as protocol;
+import 'package:serverpod_shared/log.dart';
 
 /// Discriminates session subtypes in [SessionOpen.type] and other
 /// session records.
@@ -393,14 +390,3 @@ final MultiSessionLogWriter sessionLogWriter = MultiSessionLogWriter([]);
 /// reassigned. Entry points configure session logging by mutating
 /// [sessionLogWriter], not by replacing [sessionLog].
 final SessionLog sessionLog = SessionLog(sessionLogWriter);
-
-/// Maps serverpod's generated [protocol.LogLevel] to the shared
-/// [LogLevel] used on session entries.
-@internal
-LogLevel toSessionLogLevel(protocol.LogLevel level) => switch (level) {
-  protocol.LogLevel.debug => LogLevel.debug,
-  protocol.LogLevel.info => LogLevel.info,
-  protocol.LogLevel.warning => LogLevel.warning,
-  protocol.LogLevel.error => LogLevel.error,
-  protocol.LogLevel.fatal => LogLevel.fatal,
-};

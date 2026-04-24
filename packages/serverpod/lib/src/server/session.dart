@@ -8,6 +8,7 @@ import 'package:serverpod/src/server/features.dart';
 import 'package:serverpod/src/server/log_manager/session_log_manager.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 import 'package:serverpod_shared/log.dart' as shared show log, LogConvenience;
+import 'package:serverpod_shared/log.dart';
 
 import '../cache/caches.dart';
 

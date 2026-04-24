@@ -57,8 +57,8 @@ class JsonSessionLogWriter extends SessionLogWriter {
       protocol.SessionLogEntry(:final error) => error != null,
       protocol.LogEntry(:final error, :final logLevel) =>
         error != null ||
-            logLevel == protocol.LogLevel.error ||
-            logLevel == protocol.LogLevel.fatal,
+            logLevel == LogLevel.error ||
+            logLevel == LogLevel.fatal,
       protocol.QueryLogEntry(:final error) => error != null,
       protocol.MessageLogEntry(:final error) => error != null,
       _ => false,
@@ -114,7 +114,7 @@ class JsonSessionLogWriter extends SessionLogWriter {
       serverId: state.open.serverId,
       messageId: entry.messageId,
       time: entry.time,
-      logLevel: _toProtocolLogLevel(entry.level),
+      logLevel: entry.level,
       message: entry.message,
       error: entry.error,
       stackTrace: entry.stackTrace?.toString(),
@@ -157,14 +157,6 @@ class JsonSessionLogWriter extends SessionLogWriter {
       order: entry.order,
     );
   }
-
-  protocol.LogLevel _toProtocolLogLevel(LogLevel level) => switch (level) {
-    LogLevel.debug => protocol.LogLevel.debug,
-    LogLevel.info => protocol.LogLevel.info,
-    LogLevel.warning => protocol.LogLevel.warning,
-    LogLevel.error => protocol.LogLevel.error,
-    LogLevel.fatal => protocol.LogLevel.fatal,
-  };
 }
 
 class _OpenState {

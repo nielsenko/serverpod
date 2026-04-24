@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart';
 
 /// Prefix for sessions keys
 /// "sas" being abbreviated of "serverpod_auth_session"

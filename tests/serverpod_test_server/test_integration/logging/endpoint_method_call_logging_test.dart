@@ -1,5 +1,7 @@
 import 'dart:io';
+
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_test_client/serverpod_test_client.dart';
 import 'package:serverpod_test_server/test_util/builders/log_settings_builder.dart';
 import 'package:serverpod_test_server/test_util/builders/runtime_settings_builder.dart';

@@ -7,6 +7,7 @@ import 'package:serverpod_auth_server/src/business/email_secrets.dart';
 import 'package:serverpod_auth_server/src/business/password_hash.dart';
 import 'package:serverpod_auth_server/src/business/user_authentication.dart';
 import 'package:serverpod_auth_server/src/business/user_images.dart';
+import 'package:serverpod_shared/log.dart';
 
 /// The default generate password hash, using argon2id.
 ///

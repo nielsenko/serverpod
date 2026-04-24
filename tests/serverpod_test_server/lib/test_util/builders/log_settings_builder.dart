@@ -1,4 +1,5 @@
 import 'package:serverpod/protocol.dart';
+import 'package:serverpod_shared/log.dart';
 
 class LogSettingsBuilder {
   LogLevel _logLevel = LogLevel.debug;

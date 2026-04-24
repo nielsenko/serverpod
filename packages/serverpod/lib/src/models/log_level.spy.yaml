@@ -1,9 +1,0 @@
-### Represents different log levels.
-enum: LogLevel
-serialized: byIndex
-values:
-  - debug
-  - info
-  - warning
-  - error
-  - fatal
