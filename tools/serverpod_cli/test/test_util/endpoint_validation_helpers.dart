@@ -19,12 +19,8 @@ Future<String> _resolveServerpodRoot() async {
   );
 }
 
-Future createTestEnvironment(
-  Directory testProjectDirectory,
-  String pathToServerpodRoot,
-) async {
-  // Ignore the caller-provided value; resolve a stable absolute path here.
-  pathToServerpodRoot = await _resolveServerpodRoot();
+Future createTestEnvironment(Directory testProjectDirectory) async {
+  final pathToServerpodRoot = await _resolveServerpodRoot();
 
   var pubspecFile = File(path.join(testProjectDirectory.path, 'pubspec.yaml'));
   pubspecFile.createSync(recursive: true);
