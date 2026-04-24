@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart';
 
 import '../../../../../core.dart';
 import '../../../common/id_token_verifier/id_token_verifier.dart';
@@ -229,7 +230,7 @@ class FirebaseIdpUtils {
 
 extension on Session {
   Never logAndThrow(final String message) {
-    log(message, level: LogLevel.debug);
+    this.log(message, level: LogLevel.debug);
     throw FirebaseIdTokenVerificationException();
   }
 }

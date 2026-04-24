@@ -11,7 +11,7 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:serverpod/serverpod.dart' as _i1;
-import 'log_level.dart' as _i2;
+import 'package:serverpod_shared/log.dart' as _i2;
 
 /// Bindings to a log entry in the database.
 abstract class LogEntry
@@ -52,7 +52,7 @@ abstract class LogEntry
       reference: jsonSerialization['reference'] as String?,
       serverId: jsonSerialization['serverId'] as String,
       time: _i1.DateTimeJsonExtension.fromJson(jsonSerialization['time']),
-      logLevel: _i2.LogLevel.fromJson((jsonSerialization['logLevel'] as int)),
+      logLevel: _i2.LogLevel.fromJson(jsonSerialization['logLevel']),
       message: jsonSerialization['message'] as String,
       error: jsonSerialization['error'] as String?,
       stackTrace: jsonSerialization['stackTrace'] as String?,
@@ -144,7 +144,11 @@ abstract class LogEntry
       if (reference != null) 'reference': reference,
       'serverId': serverId,
       'time': time.toJson(),
-      'logLevel': logLevel.toJson(),
+      'logLevel':
+          // ignore: unnecessary_type_check
+          logLevel is _i1.ProtocolSerialization
+          ? (logLevel as _i1.ProtocolSerialization).toJsonForProtocol()
+          : logLevel.toJson(),
       'message': message,
       if (error != null) 'error': error,
       if (stackTrace != null) 'stackTrace': stackTrace,
@@ -237,7 +241,7 @@ class _LogEntryImpl extends LogEntry {
       reference: reference is String? ? reference : this.reference,
       serverId: serverId ?? this.serverId,
       time: time ?? this.time,
-      logLevel: logLevel ?? this.logLevel,
+      logLevel: logLevel ?? this.logLevel.copyWith(),
       message: message ?? this.message,
       error: error is String? ? error : this.error,
       stackTrace: stackTrace is String? ? stackTrace : this.stackTrace,
@@ -324,10 +328,9 @@ class LogEntryTable extends _i1.Table<int?> {
       'time',
       this,
     );
-    logLevel = _i1.ColumnEnum(
+    logLevel = _i1.ColumnSerializable<_i2.LogLevel>(
       'logLevel',
       this,
-      _i1.EnumSerialization.byIndex,
     );
     message = _i1.ColumnString(
       'message',
@@ -365,7 +368,7 @@ class LogEntryTable extends _i1.Table<int?> {
   late final _i1.ColumnDateTime time;
 
   /// The log level of this entry.
-  late final _i1.ColumnEnum<_i2.LogLevel> logLevel;
+  late final _i1.ColumnSerializable<_i2.LogLevel> logLevel;
 
   /// The logging message.
   late final _i1.ColumnString message;

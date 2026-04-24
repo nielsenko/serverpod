@@ -28,7 +28,6 @@ void main() {
         label: 'Test',
         success: true,
         duration: const Duration(milliseconds: 100),
-        entries: [],
       );
       final after = DateTime.now();
 
@@ -48,7 +47,6 @@ void main() {
         label: 'Test',
         success: false,
         duration: const Duration(seconds: 5),
-        entries: [],
         completedAt: time,
       );
 
@@ -72,7 +70,6 @@ void main() {
       expect(state.serverReady, isFalse);
       expect(state.showSplash, isTrue);
       expect(state.showHelp, isFalse);
-      expect(state.expandOperations, isFalse);
     });
   });
 }

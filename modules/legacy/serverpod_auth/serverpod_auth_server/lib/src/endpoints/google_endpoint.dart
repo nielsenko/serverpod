@@ -14,6 +14,7 @@ import 'package:serverpod_auth_server/src/business/config.dart';
 import 'package:serverpod_auth_server/src/business/google_auth.dart';
 import 'package:serverpod_auth_server/src/business/user_authentication.dart';
 import 'package:serverpod_auth_server/src/business/user_images.dart';
+import 'package:serverpod_shared/log.dart';
 
 import '../business/users.dart';
 import '../generated/protocol.dart';

@@ -1,5 +1,6 @@
 import 'package:serverpod/protocol.dart' as protocol;
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_test_server/src/generated/protocol.dart';
 import 'package:serverpod_test_server/test_util/test_serverpod.dart';
 import 'package:test/test.dart';
@@ -371,9 +372,10 @@ void main() async {
         'when inserting all rows with ignoreConflicts then a performance warning is logged.',
         () async {
           // Use a separate session that can be closed to flush cached logs
-          // to the database.
-          var logServer = IntegrationTestServer();
-          var logSession = await logServer.session();
+          // to the database. Reusing the shared Serverpod avoids installing
+          // a second DatabaseSessionLogWriter on the global chain, which
+          // would double-persist every log entry.
+          var logSession = await Serverpod.instance.createSession();
 
           var data = List.generate(
             101,
