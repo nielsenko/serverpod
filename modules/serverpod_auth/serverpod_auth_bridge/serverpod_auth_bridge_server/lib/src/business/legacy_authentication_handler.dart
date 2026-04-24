@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_bridge_server/src/generated/protocol.dart';
+import 'package:serverpod_shared/log.dart';
 
 /// Returns the `LegacySession` in case the session key can be properly validted.
 ///

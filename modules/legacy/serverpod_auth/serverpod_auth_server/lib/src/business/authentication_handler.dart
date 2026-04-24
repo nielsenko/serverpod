@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_server/serverpod_auth_server.dart';
 import 'package:serverpod_auth_server/src/business/authentication_util.dart';
+import 'package:serverpod_shared/log.dart';
 
 /// The [AuthenticationHandler], uses the auth_key table from the
 /// database to authenticate a user.

@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:clock/clock.dart';
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' hide LogLevel;
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../../auth_user/auth_user.dart';
 import '../../generated/protocol.dart';

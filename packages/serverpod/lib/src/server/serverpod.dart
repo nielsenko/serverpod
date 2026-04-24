@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:serverpod/src/server/log_manager/session_log.dart';
+import 'package:serverpod/src/server/log_manager/serverpod_logging.dart';
 import 'package:serverpod/src/cloud_storage/public_endpoint.dart';
 import 'package:serverpod/src/config/version.dart';
 import 'package:serverpod/src/database/server_migration_manager.dart';

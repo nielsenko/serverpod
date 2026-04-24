@@ -6,6 +6,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:serverpod/src/server/health_check.dart';
 import 'package:serverpod/src/server/serverpod.dart';
 import 'package:serverpod/src/util/date_time_extension.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 import 'package:system_resources_2/system_resources_2.dart';
 

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' show LogLevel;
+import 'package:serverpod_shared/log.dart' show LogLevel;
 
 import '../../generated/protocol.dart' as protocol;
 import '../serverpod.dart';

@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:cli_tools/cli_tools.dart' as cli;
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/analyzer/code_analysis_collector.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_shared/log_io.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
 
 import 'std_out_log_writer.dart';
 

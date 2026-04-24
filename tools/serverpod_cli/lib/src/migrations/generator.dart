@@ -17,7 +17,7 @@ import 'package:serverpod_database/serverpod_database.dart';
 // [MigrationGenerator] gets moved to the database package.
 // ignore: implementation_imports
 import 'package:serverpod_database/src/definition/definition_normalizer.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' hide log;
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 class MigrationGenerator {
   MigrationGenerator({

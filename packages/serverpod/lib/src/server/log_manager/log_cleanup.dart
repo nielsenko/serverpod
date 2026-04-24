@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:meta/meta.dart';
 import 'package:serverpod/protocol.dart';
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart';
 
 @internal
 class LogCleanupManager {

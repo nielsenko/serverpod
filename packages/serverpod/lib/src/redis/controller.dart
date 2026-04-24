@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:redis/redis.dart';
-import 'package:serverpod/src/server/log_manager/log.dart';
+import 'package:serverpod_shared/log.dart';
 
 /// Callback when messages are received on a specific channel from Redis.
 typedef RedisSubscriptionCallback =

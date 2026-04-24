@@ -11,7 +11,7 @@ import 'package:serverpod_cli/src/util/project_name.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_cli/src/util/string_validators.dart';
 import 'package:serverpod_database/serverpod_database.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' hide ExitException, log;
+import 'package:serverpod_shared/serverpod_shared.dart' hide ExitException;
 
 enum CreateMigrationOption<V> implements OptionDefinition<V> {
   force(CreateMigrationCommand.forceOption),

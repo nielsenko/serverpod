@@ -1,7 +1,7 @@
 import 'package:serverpod_cli/src/commands/start/tui/app.dart';
 import 'package:serverpod_cli/src/commands/start/tui/state.dart';
 import 'package:serverpod_cli/src/commands/start/tui/tui_log_writer.dart';
-import 'package:serverpod_shared/serverpod_shared.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:test/test.dart';
 
 LogEntry _entry(String message, {LogLevel level = LogLevel.info}) => LogEntry(

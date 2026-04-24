@@ -4,6 +4,7 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod/src/cache/caches.dart';
 import 'package:serverpod/src/server/diagnostic_events/diagnostic_events.dart';
 import 'package:serverpod/src/server/health_check.dart';

@@ -1,6 +1,6 @@
 import 'dart:developer' as developer;
 
-import 'package:serverpod_shared/serverpod_shared.dart';
+import 'package:serverpod_shared/log.dart';
 
 /// Posts structured log events via the VM service extension
 /// `ext.serverpod.log`, so CLI clients can subscribe via

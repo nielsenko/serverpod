@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:meta/meta.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_shared/log_io.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 

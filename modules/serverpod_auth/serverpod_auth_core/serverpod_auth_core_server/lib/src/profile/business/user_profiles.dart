@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart';
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' hide LogLevel;
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 import '../../generated/protocol.dart';
 import '../util/user_profile_extension.dart';

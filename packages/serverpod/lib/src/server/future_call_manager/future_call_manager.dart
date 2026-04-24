@@ -4,6 +4,7 @@ import 'package:clock/clock.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/protocol.dart';
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart' hide LogLevel;
 
 import 'future_call_diagnostics_service.dart';
 import 'future_call_scanner.dart';

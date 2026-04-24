@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_database/serverpod_database.dart';
-import 'package:serverpod_shared/serverpod_shared.dart' hide log;
+import 'package:serverpod_shared/serverpod_shared.dart';
 
 class DatabaseSetup {
   static Future<bool> createDefaultMigration(

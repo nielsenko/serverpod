@@ -1,4 +1,4 @@
-import 'package:serverpod_shared/serverpod_shared.dart';
+import 'package:serverpod_shared/log.dart';
 
 import 'app.dart';
 import 'state.dart';

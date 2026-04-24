@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
+import 'package:serverpod_shared/log.dart';
 import 'package:serverpod/src/server/dev_auto_refresh_script.dart';
 import 'package:serverpod/src/server/diagnostic_events/diagnostic_events.dart';
 import 'package:serverpod/src/server/serverpod.dart';
