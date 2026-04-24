@@ -483,11 +483,6 @@ class Serverpod {
     List<String> args, {
     ServerpodConfig? config,
   }) {
-    // Set the singleton early so anything Serverpod's own constructor
-    // touches (e.g. CommandLineArgs warning on parse failure) can reach
-    // [Serverpod.instance].
-    _instance = this;
-
     _writeLifecycleMessage(
       'SERVERPOD version: $serverpodVersion, dart: ${Platform.version}, time: ${DateTime.now().toUtc()}',
     );
@@ -586,6 +581,7 @@ class Serverpod {
   }
 
   void _innerInitializeServerpod() {
+    _instance = this;
     _internalSerializationManager = internal.Protocol();
     Features(config);
 
