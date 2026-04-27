@@ -286,7 +286,9 @@ class StartCommand extends ServerpodCommand<StartOption> {
   }
 }
 
-/// Constructs a [NativeAssetsBuilder] for the server at [serverDir].
+/// Constructs a [NativeAssetsBuilder] for the server at [serverDir]. The
+/// builder discovers `package_config.json` itself (walking up to a workspace
+/// root if needed).
 NativeAssetsBuilder _createNativeAssetsBuilder({
   required String serverDir,
   required String serverpodToolDir,
@@ -295,11 +297,6 @@ NativeAssetsBuilder _createNativeAssetsBuilder({
   return NativeAssetsBuilder(
     dartExecutable: dartExecutable,
     serverDir: serverDir,
-    packageConfigPath: p.join(
-      serverDir,
-      '.dart_tool',
-      'package_config.json',
-    ),
     outputDir: p.join(serverpodToolDir, 'native_assets'),
   );
 }

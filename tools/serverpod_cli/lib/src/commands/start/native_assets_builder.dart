@@ -11,6 +11,7 @@ import 'package:hooks_runner/hooks_runner.dart' as hr;
 import 'package:logging/logging.dart' show Level, Logger, LogRecord;
 import 'package:package_config/package_config.dart' as pc;
 import 'package:path/path.dart' as p;
+import 'package:pubspec_parse/pubspec_parse.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_cli/src/vendored/native_assets_bundling.dart';
 
@@ -67,16 +68,16 @@ class NativeAssetsBuilder {
   /// Path to the dart executable (used to compile and run individual hooks).
   final String dartExecutable;
 
-  /// The server directory (the package whose hooks we recurse from).
+  /// The server package directory. The package_config.json lives either here
+  /// (standalone) or in the workspace root above it; [_discoverPaths] walks
+  /// up to find it.
   final String serverDir;
-
-  /// Path to the `package_config.json` for the server's `.dart_tool` dir.
-  final String packageConfigPath;
 
   /// Output directory for the assets and the manifest yaml (typically
   /// `<serverDir>/.dart_tool/serverpod/native_assets/`).
   final String outputDir;
 
+  Future<_ResolvedPaths>? _pathsFuture;
   Future<hr.PackageLayout>? _packageLayoutFuture;
   Future<hr.NativeAssetsBuildRunner>? _runnerFuture;
   String? _lastManifestContent;
@@ -89,7 +90,6 @@ class NativeAssetsBuilder {
   NativeAssetsBuilder({
     required this.dartExecutable,
     required this.serverDir,
-    required this.packageConfigPath,
     required this.outputDir,
   });
 
@@ -97,24 +97,63 @@ class NativeAssetsBuilder {
   /// been written yet).
   String get manifestPath => p.join(outputDir, 'native_assets.yaml');
 
-  /// Drops the cached package layout / runner so the next [build] reloads
-  /// `package_config.json`. Call after a `pub get` or other change that
-  /// adds or removes packages with build hooks.
+  /// Drops every cache so the next [build] re-discovers the workspace,
+  /// reloads `package_config.json`, and treats the next manifest as freshly
+  /// generated. Call after a `pub get` or other change that adds or removes
+  /// packages with build hooks.
   void reset() {
+    _pathsFuture = null;
     _packageLayoutFuture = null;
     _runnerFuture = null;
     _lastManifestContent = null;
     _lastEncodedAssets = null;
   }
 
+  /// Walks up from [serverDir] to the first pubspec that is *not* a workspace
+  /// member (i.e. `resolution != 'workspace'`). That directory is either the
+  /// workspace root (when a workspace is in use) or the package itself (when
+  /// it isn't). Pub places `.dart_tool/` only at that root.
+  Future<_ResolvedPaths> _discoverPaths() async {
+    var dir = p.canonicalize(serverDir);
+    while (true) {
+      final pubspec = await _tryLoadPubspec(dir);
+      if (pubspec != null && pubspec.resolution != 'workspace') {
+        final cfg = p.join(dir, '.dart_tool', 'package_config.json');
+        final graph = p.join(dir, '.dart_tool', 'package_graph.json');
+        if (!await File(cfg).exists() || !await File(graph).exists()) {
+          throw StateError(
+            'Found project root at $dir but its .dart_tool is missing '
+            'package_config.json / package_graph.json. Run `dart pub get`.',
+          );
+        }
+        return _ResolvedPaths(
+          packageConfigPath: cfg,
+          workspacePubspecPath: p.join(dir, 'pubspec.yaml'),
+        );
+      }
+      final parent = p.dirname(dir);
+      if (parent == dir) {
+        throw StateError(
+          'No project root pubspec found walking up from $serverDir. '
+          'Server packages with `resolution: workspace` need a workspace '
+          'root pubspec above them.',
+        );
+      }
+      dir = parent;
+    }
+  }
+
   Future<hr.PackageLayout> _loadPackageLayout() async {
-    final pkgConfigUri = Uri.file(p.absolute(packageConfigPath));
+    final paths = await (_pathsFuture ??= _discoverPaths());
+    final pkgConfigUri = Uri.file(paths.packageConfigPath);
     final packageConfig = await pc.loadPackageConfigUri(pkgConfigUri);
 
-    // The server is the root package; we want to build hooks of the server
-    // and all its (non-dev) transitive dependencies.
-    final pubspecPath = p.join(serverDir, 'pubspec.yaml');
-    final pubspecName = await _readPubspecName(pubspecPath);
+    // The server is the package whose transitive (non-dev) deps we walk.
+    // It may be a workspace member, in which case the discovered config
+    // covers it along with its siblings.
+    final pubspecName = await _readPubspecName(
+      p.join(serverDir, 'pubspec.yaml'),
+    );
 
     return hr.PackageLayout.fromPackageConfig(
       _fileSystem,
@@ -127,13 +166,14 @@ class NativeAssetsBuilder {
 
   Future<hr.NativeAssetsBuildRunner> _createRunner() async {
     final layout = await (_packageLayoutFuture ??= _loadPackageLayout());
+    final paths = await (_pathsFuture ??= _discoverPaths());
     return hr.NativeAssetsBuildRunner(
       dartExecutable: Uri.file(dartExecutable),
       logger: _logger,
       fileSystem: _fileSystem,
       packageLayout: layout,
       userDefines: hr.UserDefines(
-        workspacePubspec: Uri.file(p.absolute(serverDir, 'pubspec.yaml')),
+        workspacePubspec: Uri.file(paths.workspacePubspecPath),
       ),
     );
   }
@@ -229,6 +269,15 @@ class NativeAssetsBuilder {
 /// floor as `dart run`.
 const _minMacOSVersion = 13;
 
+class _ResolvedPaths {
+  final String packageConfigPath;
+  final String workspacePubspecPath;
+  const _ResolvedPaths({
+    required this.packageConfigPath,
+    required this.workspacePubspecPath,
+  });
+}
+
 /// Routes a single `hooks_runner` log record into the serverpod CLI logger.
 void _forwardLogRecord(LogRecord rec) {
   final v = rec.level.value;
@@ -244,23 +293,19 @@ void _forwardLogRecord(LogRecord rec) {
 }
 
 Future<String> _readPubspecName(String pubspecPath) async {
-  final lines = await File(pubspecPath).readAsLines();
-  for (final line in lines) {
-    final trimmed = line.trim();
-    if (trimmed.startsWith('name:')) {
-      final value = trimmed.substring('name:'.length).trim();
-      // Strip optional surrounding quotes.
-      return value.replaceAll(
-        RegExp(
-          r'^["'
-          "'"
-          r']|["'
-          "'"
-          r']$',
-        ),
-        '',
-      );
-    }
+  final pubspec = await _tryLoadPubspec(p.dirname(pubspecPath));
+  if (pubspec == null) {
+    throw StateError('Could not parse pubspec at $pubspecPath');
   }
-  throw StateError('Could not find package name in $pubspecPath');
+  return pubspec.name;
+}
+
+Future<Pubspec?> _tryLoadPubspec(String dir) async {
+  final file = File(p.join(dir, 'pubspec.yaml'));
+  if (!await file.exists()) return null;
+  try {
+    return Pubspec.parse(await file.readAsString());
+  } on Exception {
+    return null;
+  }
 }

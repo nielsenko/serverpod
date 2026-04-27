@@ -17,11 +17,6 @@ void main() {
       builder = NativeAssetsBuilder(
         dartExecutable: _dartExecutable(),
         serverDir: tempDir.path,
-        packageConfigPath: p.join(
-          tempDir.path,
-          '.dart_tool',
-          'package_config.json',
-        ),
         outputDir: p.join(tempDir.path, '.dart_tool', 'serverpod', 'na'),
       );
     });
@@ -64,6 +59,110 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
   });
+
+  group('Given a workspace with the server as a member package', () {
+    late Directory tempDir;
+    late NativeAssetsBuilder builder;
+    late String serverDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp(
+        'native_assets_builder_workspace_test_',
+      );
+      serverDir = p.join(tempDir.path, 'server');
+      await _createWorkspaceProject(
+        rootDir: tempDir.path,
+        memberDir: serverDir,
+      );
+      builder = NativeAssetsBuilder(
+        dartExecutable: _dartExecutable(),
+        serverDir: serverDir,
+        outputDir: p.join(serverDir, '.dart_tool', 'serverpod', 'na'),
+      );
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    test(
+      'when build is called from the member dir, '
+      'then path discovery walks up to the workspace root',
+      () async {
+        final outcome = await builder.build();
+        expect(outcome, isA<NativeAssetsBuildSkipped>());
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+  });
+}
+
+/// Creates a Dart workspace at [rootDir] with one member at [memberDir].
+/// `.dart_tool/` lives only at the workspace root, matching real pub layout.
+Future<void> _createWorkspaceProject({
+  required String rootDir,
+  required String memberDir,
+}) async {
+  final relMember = p.relative(memberDir, from: rootDir);
+
+  await Directory('$rootDir/.dart_tool').create(recursive: true);
+  await Directory(memberDir).create(recursive: true);
+
+  await File('$rootDir/pubspec.yaml').writeAsString('''
+name: test_workspace
+environment:
+  sdk: ^3.8.0
+workspace:
+  - $relMember
+''');
+
+  await File('$memberDir/pubspec.yaml').writeAsString('''
+name: test_server
+environment:
+  sdk: ^3.8.0
+resolution: workspace
+''');
+
+  await File('$rootDir/.dart_tool/package_config.json').writeAsString('''
+{
+  "configVersion": 2,
+  "packages": [
+    {
+      "name": "test_workspace",
+      "rootUri": "..",
+      "packageUri": "lib/"
+    },
+    {
+      "name": "test_server",
+      "rootUri": "../$relMember",
+      "packageUri": "lib/"
+    }
+  ]
+}
+''');
+
+  await File('$rootDir/.dart_tool/package_graph.json').writeAsString('''
+{
+  "roots": ["test_workspace", "test_server"],
+  "packages": [
+    {
+      "name": "test_workspace",
+      "version": "1.0.0",
+      "dependencies": [],
+      "devDependencies": []
+    },
+    {
+      "name": "test_server",
+      "version": "1.0.0",
+      "dependencies": [],
+      "devDependencies": []
+    }
+  ],
+  "configVersion": 1
+}
+''');
 }
 
 /// Creates a minimal Dart project with `pubspec.yaml` and a
