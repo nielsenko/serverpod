@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod_shared/log.dart';
 
 import '../../../../../core.dart';
 import 'facebook_idp_config.dart';
@@ -334,7 +333,7 @@ class FacebookIdpUtils {
 
 extension on Session {
   Never logAndThrow(final String message) {
-    this.log(message, level: LogLevel.debug);
+    log(message, level: LogLevel.debug);
     throw FacebookAccessTokenVerificationException();
   }
 }

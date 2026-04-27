@@ -13,21 +13,7 @@ enum LogLevel {
   error,
 
   /// Unrecoverable failures. Usually followed by process teardown.
-  fatal;
-
-  /// Converts an integer index to a [LogLevel].
-  static LogLevel fromJson(int index) {
-    if (index < 0 || index >= LogLevel.values.length) {
-      throw ArgumentError('Value "$index" cannot be converted to "LogLevel"');
-    }
-    return LogLevel.values[index];
-  }
-
-  /// Converts this [LogLevel] to an integer index.
-  int toJson() => index;
-
-  /// Returns a copy of this [LogLevel] with the given fields replaced.
-  LogLevel copyWith({int? index}) => LogLevel.values[index ?? this.index];
+  fatal,
 }
 
 /// A scoped operation. Scopes form a tree - every scope has a parent except the

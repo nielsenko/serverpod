@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:meta/meta.dart';
+import 'package:serverpod_shared/log.dart' show LogLevel;
 
 import '../../../generated/protocol.dart' as protocol;
 import '../../session.dart';
@@ -202,7 +203,7 @@ class DatabaseSessionLogWriter extends SessionLogWriter {
       serverId: open.serverId,
       messageId: entry.messageId,
       time: entry.time,
-      logLevel: entry.level,
+      logLevel: _toProtocolLogLevel(entry.level),
       message: entry.message,
       error: entry.error,
       stackTrace: entry.stackTrace?.toString(),
@@ -249,6 +250,14 @@ class DatabaseSessionLogWriter extends SessionLogWriter {
       order: entry.order,
     );
   }
+
+  protocol.LogLevel _toProtocolLogLevel(LogLevel level) => switch (level) {
+    LogLevel.debug => protocol.LogLevel.debug,
+    LogLevel.info => protocol.LogLevel.info,
+    LogLevel.warning => protocol.LogLevel.warning,
+    LogLevel.error => protocol.LogLevel.error,
+    LogLevel.fatal => protocol.LogLevel.fatal,
+  };
 }
 
 class _SessionState {

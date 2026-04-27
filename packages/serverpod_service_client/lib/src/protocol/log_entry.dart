@@ -11,7 +11,7 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
-import 'package:serverpod_shared/log.dart' as _i2;
+import 'log_level.dart' as _i2;
 
 /// Bindings to a log entry in the database.
 abstract class LogEntry implements _i1.SerializableModel {
@@ -51,7 +51,7 @@ abstract class LogEntry implements _i1.SerializableModel {
       reference: jsonSerialization['reference'] as String?,
       serverId: jsonSerialization['serverId'] as String,
       time: _i1.DateTimeJsonExtension.fromJson(jsonSerialization['time']),
-      logLevel: _i2.LogLevel.fromJson(jsonSerialization['logLevel']),
+      logLevel: _i2.LogLevel.fromJson((jsonSerialization['logLevel'] as int)),
       message: jsonSerialization['message'] as String,
       error: jsonSerialization['error'] as String?,
       stackTrace: jsonSerialization['stackTrace'] as String?,
@@ -187,7 +187,7 @@ class _LogEntryImpl extends LogEntry {
       reference: reference is String? ? reference : this.reference,
       serverId: serverId ?? this.serverId,
       time: time ?? this.time,
-      logLevel: logLevel ?? this.logLevel.copyWith(),
+      logLevel: logLevel ?? this.logLevel,
       message: message ?? this.message,
       error: error is String? ? error : this.error,
       stackTrace: stackTrace is String? ? stackTrace : this.stackTrace,

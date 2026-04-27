@@ -1,5 +1,4 @@
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod_shared/log.dart';
 
 import '../../../../../core.dart';
 import 'email_idp_admin.dart';

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:serverpod/serverpod.dart';
+import 'package:serverpod/serverpod.dart' hide LogLevel;
 import 'package:serverpod_database/serverpod_database.dart';
 import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
@@ -226,8 +226,8 @@ class Serverpod {
         logFailedQueries: true,
         logStreamingSessionsContinuously: true,
         logLevel: runMode == ServerpodRunMode.development
-            ? LogLevel.debug
-            : LogLevel.info,
+            ? internal.LogLevel.debug
+            : internal.LogLevel.info,
         slowSessionDuration: 1.0,
         slowQueryDuration: 1.0,
       ),

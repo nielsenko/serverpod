@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:meta/meta.dart';
-import 'package:serverpod_shared/log.dart';
+import 'package:serverpod_shared/log.dart' show LogLevel;
 
-import '../../generated/protocol.dart' hide SessionLogEntry;
+import '../../generated/protocol.dart' as protocol;
 import '../serverpod.dart';
 import '../session.dart';
 import 'session_log.dart';
@@ -20,7 +20,7 @@ const double _microNormalizer = 1000 * 1000;
 class SessionLogManager {
   final Session _session;
   final SessionLog _log;
-  final LogSettings Function(Session) _settingsForSession;
+  final protocol.LogSettings Function(Session) _settingsForSession;
   final bool _disableSlowSessionLogging;
   final String _serverId;
 
@@ -50,7 +50,7 @@ class SessionLogManager {
   @internal
   SessionLogManager({
     required Session session,
-    required LogSettings Function(Session) settingsForSession,
+    required protocol.LogSettings Function(Session) settingsForSession,
     required String serverId,
     bool disableSlowSessionLogging = false,
   }) : _session = session,
@@ -118,6 +118,14 @@ class SessionLogManager {
     _log.open(_open);
   }
 
+  LogLevel _toSessionLogLevel(protocol.LogLevel level) => switch (level) {
+    protocol.LogLevel.debug => LogLevel.debug,
+    protocol.LogLevel.info => LogLevel.info,
+    protocol.LogLevel.warning => LogLevel.warning,
+    protocol.LogLevel.error => LogLevel.error,
+    protocol.LogLevel.fatal => LogLevel.fatal,
+  };
+
   void _dispatch(SessionEntry entry) {
     if (_closed) return;
     if (_bufferStreamingLogs) {
@@ -141,14 +149,14 @@ class SessionLogManager {
   /// Logs an entry within this session.
   @internal
   void logEntry({
-    LogLevel? level,
+    protocol.LogLevel? level,
     required String message,
     String? error,
     StackTrace? stackTrace,
   }) {
     _triggerCleanup();
 
-    final logLevel = level ?? LogLevel.info;
+    final logLevel = level ?? protocol.LogLevel.info;
     final logSettings = _settingsForSession(_session);
     if (logLevel.index < logSettings.logLevel.index) return;
 
@@ -158,7 +166,7 @@ class SessionLogManager {
         sessionId: _open.sessionId,
         order: order,
         time: DateTime.now(),
-        level: logLevel,
+        level: _toSessionLogLevel(logLevel),
         message: message,
         error: error,
         stackTrace: stackTrace,

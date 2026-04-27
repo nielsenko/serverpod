@@ -2,7 +2,6 @@ import 'dart:typed_data';
 
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_idp_server/core.dart';
-import 'package:serverpod_shared/log.dart';
 
 /// Proxy endpoint for legacy user profile operations (image, name changes).
 class LegacyUserEndpoint extends Endpoint {

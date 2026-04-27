@@ -1,5 +1,4 @@
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_test_server/src/generated/protocol.dart';
 
 class LoggingEndpoint extends Endpoint {

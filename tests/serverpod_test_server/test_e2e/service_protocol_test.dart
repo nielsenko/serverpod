@@ -1,6 +1,5 @@
 import 'package:serverpod_service_client/serverpod_service_client.dart'
     as service;
-import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_test_client/serverpod_test_client.dart';
 import 'package:serverpod_test_server/test_util/config.dart';
 import 'package:serverpod_test_server/test_util/test_service_key_manager.dart';
@@ -43,7 +42,7 @@ void main() {
           logFailedQueries: true,
           slowSessionDuration: 1.0,
           slowQueryDuration: 1.0,
-          logLevel: LogLevel.debug,
+          logLevel: service.LogLevel.debug,
         ),
         logMalformedCalls: true,
         logServiceCalls: false,
@@ -128,7 +127,7 @@ void main() {
           logFailedQueries: true,
           slowSessionDuration: 1.0,
           slowQueryDuration: 1.0,
-          logLevel: LogLevel.error,
+          logLevel: service.LogLevel.error,
         ),
         logSettingsOverrides: [],
         logMalformedCalls: true,
@@ -214,7 +213,7 @@ void main() {
           logFailedQueries: true,
           slowSessionDuration: 1.0,
           slowQueryDuration: 1.0,
-          logLevel: LogLevel.info,
+          logLevel: service.LogLevel.info,
         ),
         logMalformedCalls: true,
         logServiceCalls: false,
@@ -277,7 +276,7 @@ void main() {
           logFailedQueries: true,
           slowSessionDuration: 1.0,
           slowQueryDuration: 1.0,
-          logLevel: LogLevel.info,
+          logLevel: service.LogLevel.info,
         ),
         logMalformedCalls: true,
         logServiceCalls: false,

@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod_shared/log.dart';
 
 import '../../../../../core.dart';
 import 'github_idp_config.dart';
@@ -286,7 +285,7 @@ class GitHubIdpUtils {
 
 extension on Session {
   Never logAndThrow(final String message) {
-    this.log(message, level: LogLevel.debug);
+    log(message, level: LogLevel.debug);
     throw GitHubAccessTokenVerificationException();
   }
 }

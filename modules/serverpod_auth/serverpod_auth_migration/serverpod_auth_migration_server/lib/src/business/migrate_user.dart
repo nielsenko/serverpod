@@ -7,7 +7,6 @@ import 'package:serverpod_auth_idp_server/providers/email.dart'
 import 'package:serverpod_auth_migration_server/serverpod_auth_migration_server.dart';
 import 'package:serverpod_auth_server/serverpod_auth_server.dart'
     as legacy_auth;
-import 'package:serverpod_shared/log.dart';
 
 /// Migrates a user with all their authentication methods, if it hasn't already
 /// been migrated.

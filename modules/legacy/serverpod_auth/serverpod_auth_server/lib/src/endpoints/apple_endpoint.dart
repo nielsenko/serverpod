@@ -4,7 +4,6 @@ import 'package:http/http.dart' as http;
 import 'package:jose/jose.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_server/src/business/user_authentication.dart';
-import 'package:serverpod_shared/log.dart';
 
 import '../business/users.dart';
 import '../generated/protocol.dart';

@@ -9,7 +9,6 @@ import 'package:pointycastle/key_derivators/api.dart';
 import 'package:pointycastle/key_derivators/argon2.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_bridge_server/serverpod_auth_bridge_server.dart';
-import 'package:serverpod_shared/log.dart';
 
 /// Legacy password validation closely mirroring the behavior of `serverpod_auth`
 //
