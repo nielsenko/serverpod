@@ -14,12 +14,16 @@
   },
   "categories": [
     "Programming Languages",
-    "Linters"
+    "Linters",
+    "Debuggers"
   ],
   "activationEvents": [
     "onLanguage:yaml",
     "onLanguage:serverpod",
-    "onDebugResolve:dart"
+    "onDebug",
+    "onDebugResolve:dart",
+    "onDebugResolve:serverpod",
+    "onDebugDynamicConfigurations:serverpod"
   ],
   "pricing": "Free",
   "homepage": "https://serverpod.dev",
@@ -57,6 +61,50 @@
         "language": "serverpod",
         "scopeName": "source.serverpod",
         "path": "./syntaxes/serverpod.tmLanguage.json"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "serverpod",
+        "label": "Serverpod",
+        "languages": [
+          "dart"
+        ],
+        "configurationAttributes": {
+          "attach": {
+            "properties": {
+              "vmServiceUri": {
+                "type": "string",
+                "description": "HTTP URI of the running pod's VM service. If omitted, vmServiceInfoFile is read instead."
+              },
+              "vmServiceInfoFile": {
+                "type": "string",
+                "description": "Path to the vm-service-info.json file written by `serverpod start --watch`. Defaults to ${workspaceFolder}/.dart_tool/serverpod/vm-service-info.json.",
+                "default": "${workspaceFolder}/.dart_tool/serverpod/vm-service-info.json"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "name": "Attach to Serverpod",
+            "type": "serverpod",
+            "request": "attach",
+            "vmServiceInfoFile": "${workspaceFolder}/.dart_tool/serverpod/vm-service-info.json"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Serverpod: Attach",
+            "description": "Attach to a running `serverpod start --watch`. Hot-reload routes through serverpod's pipeline (codegen, hooks, compile, reload).",
+            "body": {
+              "name": "Attach to Serverpod",
+              "type": "serverpod",
+              "request": "attach",
+              "vmServiceInfoFile": "^\"\\${workspaceFolder}/.dart_tool/serverpod/vm-service-info.json\""
+            }
+          }
+        ]
       }
     ]
   },
