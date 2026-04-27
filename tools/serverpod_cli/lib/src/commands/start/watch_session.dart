@@ -6,6 +6,7 @@ import 'package:serverpod_cli/src/commands/generate.dart';
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/start/file_watcher.dart';
 import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
+import 'package:serverpod_cli/src/commands/start/native_assets_builder.dart';
 import 'package:serverpod_cli/src/commands/start/server_process.dart';
 import 'package:serverpod_cli/src/generator/analyzers.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
@@ -95,6 +96,7 @@ final _endpointOrFutureCallRegex = RegExp(
 
 class WatchSession {
   final KernelCompiler? _compiler;
+  final NativeAssetsBuilder? _nativeAssetsBuilder;
   final GenerateAction _generate;
   final ServerProcessFactory? _createServer;
   final Set<String> _generatedDirPaths;
@@ -119,6 +121,7 @@ class WatchSession {
 
   WatchSession({
     KernelCompiler? compiler,
+    NativeAssetsBuilder? nativeAssetsBuilder,
     required GenerateAction generate,
     ServerProcessFactory? createServer,
     required ServerProcess initialServer,
@@ -126,6 +129,7 @@ class WatchSession {
     ProtocolChangeClassifier classifyProtocolChange =
         defaultProtocolChangeClassifier,
   }) : _compiler = compiler,
+       _nativeAssetsBuilder = nativeAssetsBuilder,
        _generate = generate,
        _createServer = createServer,
        _server = initialServer,
@@ -134,6 +138,10 @@ class WatchSession {
     assert(
       (compiler == null) == (createServer == null),
       'compiler and createServer must both be provided or both be null.',
+    );
+    assert(
+      nativeAssetsBuilder == null || compiler != null,
+      'nativeAssetsBuilder requires a compiler.',
     );
     _monitorExit(initialServer);
     _trackVmServiceUri(initialServer);
@@ -261,10 +269,40 @@ class WatchSession {
     // compiles so the FES re-invalidates them (reject rolls back its state).
     final changedPaths = {..._pendingPaths, ...dartFiles};
 
+    // 1. Run native build hooks (if configured). The hook runner caches on
+    //    input hashes, so this is cheap when nothing changed. A manifest
+    //    content change requires a fresh FES because `--native-assets` is
+    //    only read at startup; track that so we don't double-restart below.
+    var compilerRestartedByHooks = false;
+    final builder = _nativeAssetsBuilder;
+    if (builder != null) {
+      if (packageConfigChanged) builder.reset();
+      final outcome = await builder.build();
+      switch (outcome) {
+        case NativeAssetsBuildSkipped():
+          break;
+        case NativeAssetsBuildFailed(:final message):
+          log.error('$message Server not reloaded.');
+          if (changedPaths.isNotEmpty) _pendingPaths.addAll(changedPaths);
+          return;
+        case NativeAssetsBuildSuccess(
+          :final manifestPath,
+          :final manifestChanged,
+        ):
+          if (manifestChanged) {
+            compiler.nativeAssetsPath = manifestPath;
+            await compiler.restart();
+            compilerRestartedByHooks = true;
+            _pendingPaths.clear();
+          }
+      }
+    }
+
+    // 2. Bring the FES into the right state for this cycle.
     CompileResult? result;
     if (forceFullCompile) {
       _pendingPaths.clear();
-      await compiler.reset();
+      if (!compilerRestartedByHooks) await compiler.reset();
       result = await compileWithProgress(
         'Compiling server',
         compiler,
@@ -274,13 +312,13 @@ class WatchSession {
       // FES reads package_config.json only at startup - must restart it.
       // After restart the FES is in initial state, so we do a full compile.
       _pendingPaths.clear();
-      await compiler.restart();
+      if (!compilerRestartedByHooks) await compiler.restart();
       result = await compileWithProgress(
         'Compiling server',
         compiler,
         rejectOnFailure: true,
       );
-    } else if (changedPaths.isNotEmpty) {
+    } else if (changedPaths.isNotEmpty || compilerRestartedByHooks) {
       result = await compileWithProgress(
         'Compiling server',
         compiler,
@@ -397,8 +435,31 @@ class WatchSession {
 
     _state = SessionState.applyingMigration;
     try {
+      // Re-run native build hooks first; if the manifest changed the
+      // restart they trigger replaces the explicit reset() below.
+      var restartedByHooks = false;
+      final builder = _nativeAssetsBuilder;
+      if (builder != null) {
+        final outcome = await builder.build();
+        switch (outcome) {
+          case NativeAssetsBuildSkipped():
+            break;
+          case NativeAssetsBuildFailed(:final message):
+            throw StateError('$message Migration not applied.');
+          case NativeAssetsBuildSuccess(
+            :final manifestPath,
+            :final manifestChanged,
+          ):
+            if (manifestChanged) {
+              compiler.nativeAssetsPath = manifestPath;
+              await compiler.restart();
+              restartedByHooks = true;
+            }
+        }
+      }
+
       // Full compile so we have a complete kernel for the new process.
-      await compiler.reset();
+      if (!restartedByHooks) await compiler.reset();
       final result = await compileWithProgress(
         'Compiling server',
         compiler,
