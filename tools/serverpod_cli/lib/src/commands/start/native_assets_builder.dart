@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
+import 'package:collection/collection.dart' show ListEquality;
 import 'package:data_assets/data_assets.dart';
 import 'package:file/local.dart';
 import 'package:hooks/hooks.dart';
@@ -11,7 +12,8 @@ import 'package:hooks_runner/hooks_runner.dart' as hr;
 import 'package:logging/logging.dart' show Level, Logger, LogRecord;
 import 'package:package_config/package_config.dart' as pc;
 import 'package:path/path.dart' as p;
-import 'package:pubspec_parse/pubspec_parse.dart';
+import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
+import 'package:serverpod_cli/src/util/pubspec_helpers.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_cli/src/vendored/native_assets_bundling.dart';
 
@@ -37,12 +39,10 @@ class NativeAssetsBuildSkipped extends NativeAssetsBuildOutcome {
 class NativeAssetsBuildSuccess extends NativeAssetsBuildOutcome {
   final String? manifestPath;
   final bool manifestChanged;
-  final List<Uri> dependencies;
 
   const NativeAssetsBuildSuccess({
     required this.manifestPath,
     required this.manifestChanged,
-    required this.dependencies,
   });
 }
 
@@ -51,6 +51,26 @@ class NativeAssetsBuildSuccess extends NativeAssetsBuildOutcome {
 class NativeAssetsBuildFailed extends NativeAssetsBuildOutcome {
   final String message;
   const NativeAssetsBuildFailed(this.message);
+}
+
+/// Outcome of [NativeAssetsBuilder.applyTo].
+sealed class NativeAssetsApplyOutcome {
+  const NativeAssetsApplyOutcome();
+}
+
+/// Hooks ran (or were skipped) and the manifest is up to date on [compiler].
+/// [restarted] is `true` when the builder restarted [KernelCompiler] because
+/// the manifest changed; the caller should treat the next compile as a full
+/// one.
+class NativeAssetsApplySuccess extends NativeAssetsApplyOutcome {
+  final bool restarted;
+  const NativeAssetsApplySuccess({this.restarted = false});
+}
+
+/// Hooks failed; [message] is a short, user-facing summary.
+class NativeAssetsApplyFailure extends NativeAssetsApplyOutcome {
+  final String message;
+  const NativeAssetsApplyFailure(this.message);
 }
 
 /// Orchestrates `package:hooks_runner` on behalf of `serverpod start`.
@@ -81,6 +101,7 @@ class NativeAssetsBuilder {
   Future<hr.PackageLayout>? _packageLayoutFuture;
   Future<hr.NativeAssetsBuildRunner>? _runnerFuture;
   String? _lastManifestContent;
+  List<EncodedAsset>? _lastEncodedAssets;
 
   /// Bridges `hooks_runner`'s `Logger` records into the serverpod CLI [log].
   /// Detached so it never escapes into the global `package:logging` hierarchy.
@@ -116,7 +137,7 @@ class NativeAssetsBuilder {
   Future<_ResolvedPaths> _discoverPaths() async {
     var dir = p.canonicalize(serverDir);
     while (true) {
-      final pubspec = await _tryLoadPubspec(dir);
+      final pubspec = await tryParsePubspecAt(dir);
       if (pubspec != null && pubspec.resolution != 'workspace') {
         final cfg = p.join(dir, '.dart_tool', 'package_config.json');
         final graph = p.join(dir, '.dart_tool', 'package_graph.json');
@@ -146,20 +167,21 @@ class NativeAssetsBuilder {
   Future<hr.PackageLayout> _loadPackageLayout() async {
     final paths = await (_pathsFuture ??= _discoverPaths());
     final pkgConfigUri = Uri.file(paths.packageConfigPath);
-    final packageConfig = await pc.loadPackageConfigUri(pkgConfigUri);
 
-    // The server is the package whose transitive (non-dev) deps we walk.
-    // It may be a workspace member, in which case the discovered config
-    // covers it along with its siblings.
-    final pubspecName = await _readPubspecName(
-      p.join(serverDir, 'pubspec.yaml'),
-    );
+    // Run the package_config load and the server pubspec read in parallel.
+    final (packageConfig, serverPubspec) = await (
+      pc.loadPackageConfigUri(pkgConfigUri),
+      tryParsePubspecAt(serverDir),
+    ).wait;
+    if (serverPubspec == null) {
+      throw StateError('Could not parse pubspec.yaml in $serverDir');
+    }
 
     return hr.PackageLayout.fromPackageConfig(
       _fileSystem,
       packageConfig,
       pkgConfigUri,
-      pubspecName,
+      serverPubspec.name,
       includeDevDependencies: false,
     );
   }
@@ -210,59 +232,95 @@ class NativeAssetsBuilder {
       );
     }
 
-    final buildResult = result.success;
-    final encodedAssets = buildResult.encodedAssets;
+    final encodedAssets = result.success.encodedAssets;
 
     // No bundleable assets -> no manifest needed. Tell the caller to ensure
     // FES is running without a --native-assets argument.
     if (encodedAssets.isEmpty) {
       final changed = _lastManifestContent != null;
       _lastManifestContent = null;
-      // Best-effort cleanup of a stale manifest from a prior run.
-      final stale = File(manifestPath);
-      if (await stale.exists()) await stale.delete();
+      _lastEncodedAssets = const [];
+      // Best-effort cleanup of a stale manifest from a prior run. Avoid
+      // exists() + delete() (TOCTOU); just delete and ignore "not found".
+      try {
+        await File(manifestPath).delete();
+      } on PathNotFoundException {
+        // Already gone.
+      }
       return NativeAssetsBuildSuccess(
         manifestPath: null,
         manifestChanged: changed,
-        dependencies: buildResult.dependencies,
       );
     }
 
-    final outputUri = Directory(outputDir).uri;
-    await Directory(outputDir).create(recursive: true);
+    // hooks_runner caches build results internally, so the encoded asset list
+    // is the same object-graph when nothing changed. Skip the bundle step
+    // entirely in that case - it would otherwise re-copy dylibs and re-run
+    // install_name_tool / codesign on macOS for every reload cycle.
+    if (_lastEncodedAssets != null &&
+        _encodedAssetsEq.equals(_lastEncodedAssets!, encodedAssets)) {
+      return NativeAssetsBuildSuccess(
+        manifestPath: manifestPath,
+        manifestChanged: false,
+      );
+    }
 
+    await Directory(outputDir).create(recursive: true);
     final kernelAssets = await bundleNativeAssets(
       encodedAssets,
       target,
-      outputUri,
+      Directory(outputDir).uri,
       relocatable: false,
     );
 
-    // Render the manifest text (without writing it yet) so we can compare
-    // against the previously written one before bouncing FES.
     const header =
         '# Native assets mapping for host OS in JIT mode.\n'
         '# Generated by serverpod_cli and package:hooks_runner.\n';
-    final body = kernelAssets.toNativeAssetsFile();
-    final newContent = '$header\n$body';
+    final newContent = '$header\n${kernelAssets.toNativeAssetsFile()}';
 
-    final manifestFile = File(manifestPath);
-    final exists = await manifestFile.exists();
-    final priorContent = exists ? await manifestFile.readAsString() : null;
-    final changed = priorContent != newContent;
+    final changed = _lastManifestContent != newContent;
     if (changed) {
+      final manifestFile = File(manifestPath);
       await manifestFile.create(recursive: true);
       await manifestFile.writeAsString(newContent);
     }
     _lastManifestContent = newContent;
+    _lastEncodedAssets = List.unmodifiable(encodedAssets);
 
     return NativeAssetsBuildSuccess(
       manifestPath: manifestPath,
       manifestChanged: changed,
-      dependencies: buildResult.dependencies,
     );
   }
+
+  /// Runs build hooks and applies the result to [compiler]:
+  ///  - `nativeAssetsPath` is updated to the freshly built manifest (if any)
+  ///  - if the manifest content changed AND [compiler] has already started,
+  ///    restarts the FES so the new `--native-assets` value takes effect
+  ///
+  /// Centralises the "did we restart?" bookkeeping that callers in the watch
+  /// loop and migration path need to avoid double-restarting.
+  Future<NativeAssetsApplyOutcome> applyTo(KernelCompiler compiler) async {
+    final outcome = await build();
+    switch (outcome) {
+      case NativeAssetsBuildSkipped():
+        return const NativeAssetsApplySuccess();
+      case NativeAssetsBuildFailed(:final message):
+        return NativeAssetsApplyFailure(message);
+      case NativeAssetsBuildSuccess(
+        :final manifestPath,
+        :final manifestChanged,
+      ):
+        if (!manifestChanged) return const NativeAssetsApplySuccess();
+        compiler.nativeAssetsPath = manifestPath;
+        if (!compiler.isStarted) return const NativeAssetsApplySuccess();
+        await compiler.restart();
+        return const NativeAssetsApplySuccess(restarted: true);
+    }
+  }
 }
+
+const _encodedAssetsEq = ListEquality<EncodedAsset>();
 
 /// Minimum macOS deployment target. Matches dartdev's default for hosts that
 /// only ever build for the current machine, so hooks compile against the same
@@ -279,33 +337,18 @@ class _ResolvedPaths {
 }
 
 /// Routes a single `hooks_runner` log record into the serverpod CLI logger.
+///
+/// Demotes `INFO` to `debug`: hooks_runner emits the full input/output JSON
+/// for every hook invocation at INFO level (build_runner.dart:638, 991,
+/// 1031), which is too verbose for normal use. Real user-facing messages are
+/// emitted at WARNING/SEVERE.
 void _forwardLogRecord(LogRecord rec) {
   final v = rec.level.value;
   if (v >= Level.SEVERE.value) {
     log.error(rec.message);
   } else if (v >= Level.WARNING.value) {
     log.warning(rec.message);
-  } else if (v >= Level.INFO.value) {
-    log.info(rec.message);
   } else {
     log.debug(rec.message);
-  }
-}
-
-Future<String> _readPubspecName(String pubspecPath) async {
-  final pubspec = await _tryLoadPubspec(p.dirname(pubspecPath));
-  if (pubspec == null) {
-    throw StateError('Could not parse pubspec at $pubspecPath');
-  }
-  return pubspec.name;
-}
-
-Future<Pubspec?> _tryLoadPubspec(String dir) async {
-  final file = File(p.join(dir, 'pubspec.yaml'));
-  if (!await file.exists()) return null;
-  try {
-    return Pubspec.parse(await file.readAsString());
-  } on Exception {
-    return null;
   }
 }

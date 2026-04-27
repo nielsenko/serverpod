@@ -272,26 +272,19 @@ class WatchSession {
     // 1. Run native build hooks (if configured). The hook runner caches on
     //    input hashes, so this is cheap when nothing changed. A manifest
     //    content change requires a fresh FES because `--native-assets` is
-    //    only read at startup; track that so we don't double-restart below.
+    //    only read at startup; the apply step restarts in that case and
+    //    reports back so we don't double-restart below.
     var compilerRestartedByHooks = false;
     final builder = _nativeAssetsBuilder;
     if (builder != null) {
       if (packageConfigChanged) builder.reset();
-      final outcome = await builder.build();
-      switch (outcome) {
-        case NativeAssetsBuildSkipped():
-          break;
-        case NativeAssetsBuildFailed(:final message):
+      switch (await builder.applyTo(compiler)) {
+        case NativeAssetsApplyFailure(:final message):
           log.error('$message Server not reloaded.');
           if (changedPaths.isNotEmpty) _pendingPaths.addAll(changedPaths);
           return;
-        case NativeAssetsBuildSuccess(
-          :final manifestPath,
-          :final manifestChanged,
-        ):
-          if (manifestChanged) {
-            compiler.nativeAssetsPath = manifestPath;
-            await compiler.restart();
+        case NativeAssetsApplySuccess(:final restarted):
+          if (restarted) {
             compilerRestartedByHooks = true;
             _pendingPaths.clear();
           }
@@ -440,21 +433,11 @@ class WatchSession {
       var restartedByHooks = false;
       final builder = _nativeAssetsBuilder;
       if (builder != null) {
-        final outcome = await builder.build();
-        switch (outcome) {
-          case NativeAssetsBuildSkipped():
-            break;
-          case NativeAssetsBuildFailed(:final message):
+        switch (await builder.applyTo(compiler)) {
+          case NativeAssetsApplyFailure(:final message):
             throw StateError('$message Migration not applied.');
-          case NativeAssetsBuildSuccess(
-            :final manifestPath,
-            :final manifestChanged,
-          ):
-            if (manifestChanged) {
-              compiler.nativeAssetsPath = manifestPath;
-              await compiler.restart();
-              restartedByHooks = true;
-            }
+          case NativeAssetsApplySuccess(:final restarted):
+            restartedByHooks = restarted;
         }
       }
 

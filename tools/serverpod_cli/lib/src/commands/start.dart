@@ -258,7 +258,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
       serverpodToolDir: serverpodToolDir,
       dartExecutable: compiler.dartExecutable,
     );
-    if (!await _initialNativeAssetsBuild(nativeAssetsBuilder, compiler)) {
+    if (!await _runHooksFor(nativeAssetsBuilder, compiler)) {
       throw ExitException.error();
     }
 
@@ -301,49 +301,24 @@ NativeAssetsBuilder _createNativeAssetsBuilder({
   );
 }
 
-/// Runs build hooks for the initial compile and stores the resulting manifest
-/// path on the compiler. Caller invokes this *before* [KernelCompiler.start]
-/// so the FES picks up `--native-assets` on its first launch. Returns false on
-/// hook failure (an error has already been logged).
-Future<bool> _initialNativeAssetsBuild(
+/// Runs build hooks via [builder] and applies the result to [compiler].
+/// Returns false on hook failure (an error has been logged).
+///
+/// Wraps [NativeAssetsBuilder.applyTo] for the start.dart paths that don't
+/// care about the restart-distinction (initial-build callers and the IDE
+/// reload callback). The watch-loop and migration paths switch on the
+/// outcome directly to read [NativeAssetsApplySuccess.restarted].
+Future<bool> _runHooksFor(
   NativeAssetsBuilder builder,
   KernelCompiler compiler,
 ) async {
-  final outcome = await builder.build();
+  final outcome = await builder.applyTo(compiler);
   switch (outcome) {
-    case NativeAssetsBuildSkipped():
+    case NativeAssetsApplySuccess():
       return true;
-    case NativeAssetsBuildFailed(:final message):
+    case NativeAssetsApplyFailure(:final message):
       log.error(message);
       return false;
-    case NativeAssetsBuildSuccess(:final manifestPath):
-      compiler.nativeAssetsPath = manifestPath;
-      return true;
-  }
-}
-
-/// Runs build hooks for an IDE-initiated reload. Restarts the FES if the
-/// manifest content changed. Returns false on hook failure.
-Future<bool> _applyNativeAssetsBuildForReload(
-  NativeAssetsBuilder builder,
-  KernelCompiler compiler,
-) async {
-  final outcome = await builder.build();
-  switch (outcome) {
-    case NativeAssetsBuildSkipped():
-      return true;
-    case NativeAssetsBuildFailed(:final message):
-      log.error(message);
-      return false;
-    case NativeAssetsBuildSuccess(
-      :final manifestPath,
-      :final manifestChanged,
-    ):
-      if (manifestChanged) {
-        compiler.nativeAssetsPath = manifestPath;
-        await compiler.restart();
-      }
-      return true;
   }
 }
 
@@ -529,7 +504,7 @@ Future<int> _startWatchSession({
       serverpodToolDir: serverpodToolDir,
       dartExecutable: localCompiler.dartExecutable,
     );
-    if (!await _initialNativeAssetsBuild(nativeAssetsBuilder, compiler)) {
+    if (!await _runHooksFor(localBuilder, localCompiler)) {
       return 1;
     }
 
@@ -548,7 +523,7 @@ Future<int> _startWatchSession({
     // changed since the last cycle if the developer edited C source), then
     // compile and return the dill path.
     Future<String?> onReloadRequested() async {
-      if (!await _applyNativeAssetsBuildForReload(
+      if (!await _runHooksFor(
         nativeAssetsBuilder!,
         compiler!,
       )) {
@@ -838,7 +813,7 @@ Future<void> _runTuiBackend({
       serverpodToolDir: serverpodToolDir,
       dartExecutable: compiler.dartExecutable,
     );
-    if (!await _initialNativeAssetsBuild(nativeAssetsBuilder, compiler)) {
+    if (!await _runHooksFor(nativeAssetsBuilder, compiler)) {
       onExitCode(1);
       return;
     }
@@ -862,7 +837,7 @@ Future<void> _runTuiBackend({
     // IDE reload callback. Re-runs build hooks first so manifest changes
     // (e.g. edited C source) are picked up before recompiling.
     Future<String?> onReloadRequested() async {
-      if (!await _applyNativeAssetsBuildForReload(
+      if (!await _runHooksFor(
         nativeAssetsBuilder,
         compiler,
       )) {
