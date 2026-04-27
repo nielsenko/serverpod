@@ -201,7 +201,7 @@ class MigrationGenerator {
     // Stored artifacts use the full merged definition (same as create-migration
     // before SQL is generated). The live database only contains objects that
     // exist for this dialect, so we must compare against the dialect-filtered
-    // target—otherwise unsupported indexes (etc.) appear as spurious drift.
+    // target-otherwise unsupported indexes (etc.) appear as spurious drift.
     var dstDatabaseForDialect = dstDatabase.forDialect(
       dialect,
       logWarnings: log.warning,

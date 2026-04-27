@@ -96,7 +96,7 @@ void main() async {
     });
 
     tearDown(() async {
-      serverProcess?.killAndWaitForExit();
+      await serverProcess?.killAndWaitForExit();
       streamSearch?.cancel();
 
       serverProcess = null;

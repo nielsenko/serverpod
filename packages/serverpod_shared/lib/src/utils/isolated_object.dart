@@ -1,7 +1,8 @@
-// TODO: verbatim copy from relic (almost). Should move to separate package.
 import 'dart:async';
 import 'dart:isolate';
 
+/// Synchronous or asynchronous producer of a [T]. Used by [IsolatedObject]
+/// to create the wrapped object inside the child isolate.
 typedef Factory<T> = FutureOr<T> Function();
 
 typedef _Action<T> = ({int id, dynamic Function(T) function});
@@ -18,6 +19,14 @@ typedef _Setup = (SendPort, ReceivePort, _Inflight);
 class IsolatedObject<T> {
   final Future<_Setup> _connected;
 
+  /// Spawns a dedicated isolate, constructs a [T] there via [create], and
+  /// returns immediately. Subsequent [evaluate] calls forward work to that
+  /// isolate.
+  ///
+  /// If [keepIsolateAlive] is true (the default), the parent isolate stays
+  /// alive as long as this object is open, matching the usual service-style
+  /// lifecycle. Set to false for fire-and-forget isolates that shouldn't
+  /// block process shutdown on their own.
   IsolatedObject(Factory<T> create, {bool keepIsolateAlive = true})
     : _connected = _connect(create, keepIsolateAlive);
 
@@ -110,6 +119,9 @@ class IsolatedObject<T> {
 
   int _nextId = 0;
   bool _isClosed = false;
+
+  /// Whether [close] has been called. Once true, further [evaluate] calls
+  /// throw a [StateError].
   bool get isClosed => _isClosed;
 
   /// Evaluates [function] on the isolated object and returns the result.

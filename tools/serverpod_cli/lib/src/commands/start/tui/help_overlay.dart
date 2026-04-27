@@ -23,12 +23,6 @@ class HelpOverlay extends StatelessComponent {
       ],
     ),
     (
-      'View',
-      [
-        ('x', 'Expand/collapse operations'),
-      ],
-    ),
-    (
       'Tabs',
       [
         ('Tab', 'Switch tab'),

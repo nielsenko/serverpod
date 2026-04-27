@@ -1,4 +1,5 @@
-import 'package:nocterm/nocterm.dart';
+import 'package:nocterm/nocterm.dart' hide LogEntry;
+import 'package:serverpod_shared/log.dart';
 
 import 'components.dart';
 import 'help_overlay.dart';
@@ -125,17 +126,20 @@ class MainScreen extends StatelessComponent {
           keyboardScrollable: false,
           itemCount: items.length,
           itemBuilder: (context, index) {
-            return switch (items[items.length - 1 - index]) {
-              TuiLogEntry entry => LogMessageWidget(
+            final item = items[items.length - 1 - index];
+            if (item is LogEntry) {
+              return LogMessageWidget(
                 key: ValueKey(index),
-                entry: entry,
-              ),
-              CompletedOperation op => CompletedOperationWidget(
+                entry: item,
+              );
+            }
+            if (item is CompletedOperation) {
+              return CompletedOperationWidget(
                 key: ValueKey(index),
-                operation: op,
-                expanded: state.expandOperations,
-              ),
-            };
+                operation: item,
+              );
+            }
+            return const SizedBox.shrink();
           },
         ),
       ),

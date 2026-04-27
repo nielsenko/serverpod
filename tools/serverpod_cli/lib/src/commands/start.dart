@@ -18,7 +18,7 @@ import 'package:serverpod_cli/src/commands/start/tui/app.dart';
 import 'package:serverpod_cli/src/commands/start/tui/event_handler.dart';
 import 'package:serverpod_cli/src/commands/start/tui/state.dart';
 import 'package:serverpod_cli/src/commands/start/tui/tui_log_sink.dart';
-import 'package:serverpod_cli/src/commands/start/tui/tui_logger.dart';
+import 'package:serverpod_cli/src/commands/start/tui/tui_log_writer.dart';
 import 'package:serverpod_cli/src/commands/start/watch_session.dart';
 import 'package:serverpod_cli/src/commands/watcher.dart';
 import 'package:serverpod_cli/src/generator/analyzers.dart';
@@ -626,14 +626,7 @@ Future<int> _runWithTui({
       interactive: interactive,
       onExitCode: (code) => exitCode = code,
     ).catchError((Object e, StackTrace st) {
-      h.state.logHistory.add(
-        TuiLogEntry(
-          timestamp: DateTime.now(),
-          level: TuiLogLevel.fatal,
-          message: 'Fatal error: $e\n$st',
-        ),
-      );
-      h.markDirty();
+      log.error('Fatal error: $e', stackTrace: st);
       exitCode = 1;
     });
   }
@@ -663,12 +656,12 @@ Future<void> _runTuiBackend({
   required bool? interactive,
   required void Function(int) onExitCode,
 }) async {
-  final tuiLogger = TuiLogger();
+  final tuiWriter = TuiLogWriter();
 
   try {
-    // Replace the CLI logger with the TUI-aware logger.
-    initializeLoggerWith(tuiLogger);
-    tuiLogger.attach(holder);
+    // Replace the CLI logger with a TUI-backed logger.
+    initializeLoggerWith(ServerpodCliLogger(tuiWriter));
+    tuiWriter.attach(holder);
 
     final directory = commandConfig.value(StartOption.directory);
 
@@ -886,14 +879,7 @@ Future<void> _runTuiBackend({
   } catch (e, st) {
     // Show the error in the TUI. Keep it open so the user can read it.
     holder.state.showSplash = false;
-    holder.state.logHistory.add(
-      TuiLogEntry(
-        timestamp: DateTime.now(),
-        level: TuiLogLevel.error,
-        message: '$e\n$st',
-      ),
-    );
-    holder.markDirty();
+    log.error('$e', stackTrace: st);
     onExitCode(1);
   }
 }

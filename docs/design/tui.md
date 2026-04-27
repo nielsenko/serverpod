@@ -2,6 +2,16 @@
 
 This document describes the nocterm-based terminal UI for the `serverpod start` command, replacing plain text logging with an interactive dashboard.
 
+> **Note:** This document is the original design proposal. The implementation
+> has since landed and the logging architecture has been generalised - see
+> [`logging.md`](logging.md) for the current `LogWriter`/`LogScope` types
+> and the live VM-service event protocol (`scope_start` / `scope_end` / `log`).
+> References below to `TuiLogger`, `IsolatedLogger`, `TextStdOutLogWriter`,
+> `JsonStdOutLogWriter`, and the `session_start` / `session_log` / `session_query`
+> / `session_end` event names are historical; treat the layout, key bindings,
+> and component breakdown as authoritative and the wire protocol details as
+> superseded.
+
 ## Current State
 
 `serverpod start --watch` outputs plain text log messages to stdout via the `cli_tools` `Logger` singleton. Server process stdout/stderr is forwarded directly to the terminal. There is no interactivity - the only control is Ctrl+C to quit.
@@ -79,7 +89,7 @@ The `log` singleton from `cli_tools` is used throughout the CLI: `WatchSession`,
 
 #### 2. `LogWriter` interface (server side)
 
-The server's structured logging system. `SessionLogManager` writes session logs (endpoint calls, queries, streaming messages) through `LogWriter` implementations: `TextStdOutLogWriter` (human-readable to stdout), `JsonStdOutLogWriter` (JSON to stdout), `DatabaseLogWriter` (persisted to database), composed via `MultipleLogWriter` and `CachedLogWriter`.
+The server's structured logging system. `SessionLogManager` writes session logs (endpoint calls, queries, streaming messages) through `LogWriter` implementations: `TextStdOutLogWriter` (human-readable to stdout), `JsonStdOutLogWriter` (JSON to stdout), `DatabaseSessionLogWriter` (persisted to database), composed via `MultipleLogWriter` and `CachedLogWriter`.
 
 Lifecycle messages (`_writeLifecycleMessage()`) are a separate path - direct `stdout.writeln()` calls in `serverpod.dart` for startup/shutdown status ("SERVERPOD version: ...", "All servers started", "Serverpod start complete", etc.). Error reporting (`_reportException()`) writes directly to `stderr.writeln()`.
 
