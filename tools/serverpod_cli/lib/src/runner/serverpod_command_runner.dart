@@ -2,6 +2,7 @@ import 'package:args/args.dart';
 import 'package:cli_tools/cli_tools.dart';
 import 'package:config/config.dart';
 import 'package:pub_semver/pub_semver.dart';
+import 'package:serverpod_cli/src/commands/dap.dart';
 import 'package:serverpod_cli/src/commands/language_server.dart';
 import 'package:serverpod_cli/src/config/experimental_feature.dart';
 import 'package:serverpod_cli/src/downloads/resource_manager.dart';
@@ -112,6 +113,14 @@ class ServerpodCommandRunner extends BetterCommandRunner<GlobalOption, void> {
     );
   }
 
+  /// Subcommands that speak a wire protocol on stdout. Any log line written
+  /// while one of these is active would corrupt the protocol framing, so
+  /// their effective log level is forced to `nothing`.
+  static const _wireProtocolCommands = <String>{
+    LanguageServerCommand.commandName,
+    DapCommand.commandName,
+  };
+
   static void _configureLogLevel({
     required CommandRunnerLogLevel parsedLogLevel,
     String? commandName,
@@ -122,7 +131,9 @@ class ServerpodCommandRunner extends BetterCommandRunner<GlobalOption, void> {
       logLevel = LogLevel.debug;
     } else if (parsedLogLevel == CommandRunnerLogLevel.quiet) {
       logLevel = LogLevel.nothing;
-    } else if (commandName == LanguageServerCommand.commandName) {
+    } else if (_wireProtocolCommands.contains(commandName)) {
+      // These subcommands speak a wire protocol on stdout (LSP / DAP); any
+      // extra log line would corrupt the framing.
       logLevel = LogLevel.nothing;
     }
 
