@@ -428,6 +428,11 @@ Future<int> _startWatchSession({
   KernelCompiler? compiler;
   ServerProcessFactory? serverProcessFactory;
   ServerProcess initialServerProcess;
+  // Late-initialised so the serverProcessFactory closure can reference it
+  // before the WatchSession is constructed below; the closure body is only
+  // evaluated when a VM service client invokes serverpod-cli.hotReload,
+  // by which point this is assigned.
+  late final WatchSession session;
 
   if (noFes) {
     // No compiler - the IDE handles compilation and hot reload.
@@ -486,6 +491,8 @@ Future<int> _startWatchSession({
             enableVmService: true,
             vmServiceInfoFile: vmServiceInfoFile,
             onReloadRequested: onReloadRequested,
+            onHotReload: () => session.forceReload(),
+            onHotRestart: () => session.forceRestart(),
           );
           await serverProcess.start(dillPath: dillPath);
           await serverProcess.connectToVmService();
@@ -495,7 +502,7 @@ Future<int> _startWatchSession({
     initialServerProcess = await serverProcessFactory(initialDill);
   }
 
-  final session = WatchSession(
+  session = WatchSession(
     compiler: compiler,
     generate: generate,
     createServer: serverProcessFactory,
@@ -769,6 +776,12 @@ Future<void> _runTuiBackend({
       return result.dillOutput ?? initialDill;
     }
 
+    // Late-initialised so the serverProcessFactory closure can reference it
+    // before the WatchSession is constructed below; the closure body is only
+    // evaluated when a VM service client invokes serverpod-cli.hotReload,
+    // by which point this is assigned.
+    late final WatchSession session;
+
     // Server process factory. Subscribes to VM service extension events
     // on each new server process so restarts pick up the new connection.
     ServerProcessFactory serverProcessFactory;
@@ -784,6 +797,8 @@ Future<void> _runTuiBackend({
             enableVmService: true,
             vmServiceInfoFile: vmServiceInfoFile,
             onReloadRequested: onReloadRequested,
+            onHotReload: () => session.forceReload(),
+            onHotRestart: () => session.forceRestart(),
             stdoutSink: stdoutSink,
             stderrSink: stderrSink,
           );
@@ -808,7 +823,7 @@ Future<void> _runTuiBackend({
     });
 
     // Create watch session.
-    final session = WatchSession(
+    session = WatchSession(
       compiler: compiler,
       generate: (affectedPaths, requirements) async {
         return analyzeAndGenerate(
