@@ -19,8 +19,19 @@ class KernelCompiler {
   final String outputDill;
   final String? packagesPath;
 
-  late final String _sdkRoot;
-  late final String _platformDill;
+  /// Native-assets manifest path forwarded as `--native-assets` to the
+  /// Frontend Server on [start]. Mutable so callers can swap the manifest
+  /// between Frontend Server restarts; the FES reads this only at startup,
+  /// so changes require a [restart] to take effect.
+  String? nativeAssetsPath;
+
+  late final String _sdkRoot = getSdkPath();
+  late final String _platformDill = p.join(
+    _sdkRoot,
+    'lib',
+    '_internal',
+    'vm_platform_strong.dill',
+  );
   late Future<FrontendServerClient> _client;
 
   bool _needsFullCompile = true;
@@ -30,6 +41,7 @@ class KernelCompiler {
     required this.entryPoint,
     this.outputDill = '.dart_tool/serverpod/server.dill',
     this.packagesPath,
+    this.nativeAssetsPath,
   });
 
   /// The path to the `dart` executable from the SDK used by this compiler.
@@ -42,14 +54,6 @@ class KernelCompiler {
   Future<void> start() async {
     if (_started) return;
 
-    _sdkRoot = getSdkPath();
-    _platformDill = p.join(
-      _sdkRoot,
-      'lib',
-      '_internal',
-      'vm_platform_strong.dill',
-    );
-
     _client = FrontendServerClient.start(
       entryPoint,
       outputDill,
@@ -57,6 +61,7 @@ class KernelCompiler {
       sdkRoot: _sdkRoot,
       target: 'vm',
       packagesJson: packagesPath,
+      nativeAssetsPath: nativeAssetsPath,
     );
     _started = true;
     _needsFullCompile = true;
