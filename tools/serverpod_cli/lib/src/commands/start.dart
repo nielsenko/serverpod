@@ -756,6 +756,13 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       vmServiceInfoFile: podInfoFile,
       stdoutSink: serverStdoutSink,
       stderrSink: serverStderrSink,
+      // Drive the full watch-session pipeline rather than the VM's built-in
+      // reload, so `serverpod_dap` reload/restart requests run codegen and
+      // hooks too. Late-bound: this factory runs for the initial boot, before
+      // `session` is assigned, but the closure body only runs once a VM
+      // service client calls in, by which point it is.
+      onHotReload: () => session.forceReload(),
+      onHotRestart: () => session.forceRestart(),
     );
     await serverProcess.start(dillPath: dillPath);
     await serverProcess.connectToVmService();
