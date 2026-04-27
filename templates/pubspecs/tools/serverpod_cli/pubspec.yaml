@@ -36,6 +36,13 @@ dependencies:
   # dependencies together when Serverpod targets Dart 3.13.
   dart_style: 3.1.7
   data_assets: '>=0.19.0 <0.20.0'
+  # dds is the Dart Development Service. We only use its DAP exports
+  # (DartCliDebugAdapter and friends) for the `serverpod dap` subcommand.
+  # Pinned to ^5.0.3 (the version flutter 3.38.1 shipped with) to keep this
+  # CLI installable alongside the broadest set of editor toolchains. The
+  # `package:dds/src/dap/...` import we rely on is identical across 5.0.3
+  # through 5.3.0; if a future 5.x release moves the file, CI catches it.
+  dds: ^5.0.3
   ffi: ^2.1.4
   file: ^7.0.1
   hooks: ^1.0.0
