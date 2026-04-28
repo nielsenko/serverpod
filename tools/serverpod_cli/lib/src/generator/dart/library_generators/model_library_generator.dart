@@ -221,6 +221,8 @@ class SerializableModelLibraryGenerator {
           // https://github.com/serverpod/serverpod/issues/3462
           if (buildRepository.hasRelationWithNonNullableIds(fields)) {
             libraryBuilder.ignoreForFile.add('unnecessary_null_comparison');
+            // On Dart 3.10+, this issue becomes a `dead_code` lint.
+            libraryBuilder.ignoreForFile.add('dead_code');
           }
         }
       },
@@ -1590,6 +1592,7 @@ class SerializableModelLibraryGenerator {
             const Code('?'),
             toJsonForProtocolExpression.call([]).code,
             const Code(':'),
+            const Code('// ignore: dead_code\n'),
             toJsonExpression.call([]).code,
           ],
         ),
