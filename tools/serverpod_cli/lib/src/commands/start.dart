@@ -494,7 +494,7 @@ Future<int> _startWatchSession({
     // Set up incremental compiler.
     final entryPoint = p.join(serverDir, 'bin', 'main.dart');
     final initialDill = p.join(serverpodToolDir, 'server.dill');
-    compiler = KernelCompiler(
+    final localCompiler = KernelCompiler(
       entryPoint: entryPoint,
       outputDill: initialDill,
     );
@@ -508,13 +508,13 @@ Future<int> _startWatchSession({
       return 1;
     }
 
-    await compiler.start();
+    await localCompiler.start();
 
     // Compile if the cached dill is stale. The FES starts in the background
     // (KernelCompiler gates compile/reset calls internally until start
     // completes), so if the dill is up to date we boot immediately.
-    if (!await compiler.compileIfNeeded(watcher.watchPaths)) {
-      await compiler.dispose();
+    if (!await localCompiler.compileIfNeeded(watcher.watchPaths)) {
+      await localCompiler.dispose();
       log.error('Initial compilation failed.');
       return 1;
     }
@@ -523,20 +523,17 @@ Future<int> _startWatchSession({
     // changed since the last cycle if the developer edited C source), then
     // compile and return the dill path.
     Future<String?> onReloadRequested() async {
-      if (!await _runHooksFor(
-        nativeAssetsBuilder!,
-        compiler!,
-      )) {
+      if (!await _runHooksFor(localBuilder, localCompiler)) {
         return null;
       }
       await localCompiler.reset();
       final result = await compileWithProgress(
         'Compiling server (IDE reload)',
-        compiler,
+        localCompiler,
         rejectOnFailure: true,
       );
       if (result == null) return null;
-      compiler.accept();
+      localCompiler.accept();
       return result.dillOutput ?? initialDill;
     }
 
@@ -548,7 +545,7 @@ Future<int> _startWatchSession({
           final serverProcess = ServerProcess(
             serverDir: serverDir,
             serverArgs: [...serverArgs, ...extraArgs],
-            dartExecutable: compiler!.dartExecutable,
+            dartExecutable: localCompiler.dartExecutable,
             enableVmService: true,
             vmServiceInfoFile: vmServiceInfoFile,
             onReloadRequested: onReloadRequested,
@@ -559,6 +556,8 @@ Future<int> _startWatchSession({
         };
 
     initialServerProcess = await serverProcessFactory(initialDill);
+    compiler = localCompiler;
+    nativeAssetsBuilder = localBuilder;
   }
 
   final session = WatchSession(
