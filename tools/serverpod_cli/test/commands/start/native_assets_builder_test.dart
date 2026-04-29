@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:package_config/package_config.dart' as pc;
 import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/commands/start/native_assets_builder.dart';
 import 'package:test/test.dart';
@@ -117,6 +118,65 @@ void main() {
       timeout: const Timeout(Duration(seconds: 60)),
     );
   });
+
+  group('Given a project with a build hook that emits no assets', () {
+    late Directory tempDir;
+    late NativeAssetsBuilder builder;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp(
+        'native_assets_builder_hook_test_',
+      );
+      await _createProjectWithBuildHook(
+        dir: tempDir.path,
+        hookBody: '// No assets emitted.',
+      );
+      builder = NativeAssetsBuilder(
+        dartExecutable: _dartExecutable(),
+        serverDir: tempDir.path,
+        outputDir: p.join(tempDir.path, '.dart_tool', 'serverpod', 'na'),
+      );
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    test(
+      'when build is called, '
+      'then it returns NativeAssetsBuildSuccess with no manifest',
+      () async {
+        final outcome = await builder.build();
+
+        expect(outcome, isA<NativeAssetsBuildSuccess>());
+        final success = outcome as NativeAssetsBuildSuccess;
+        expect(
+          success.manifestPath,
+          isNull,
+          reason:
+              'A hook that emits no assets should produce no manifest yaml. '
+              'manifestChanged=${success.manifestChanged}',
+        );
+        expect(File(builder.manifestPath).existsSync(), isFalse);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+
+    test(
+      'when build is called twice, '
+      'then the second call reports the manifest as unchanged',
+      () async {
+        await builder.build();
+        final second = await builder.build();
+
+        expect(second, isA<NativeAssetsBuildSuccess>());
+        expect((second as NativeAssetsBuildSuccess).manifestChanged, isFalse);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  });
 }
 
 /// Creates a Dart workspace at [rootDir] with one member at [memberDir].
@@ -225,6 +285,111 @@ environment:
   "configVersion": 1
 }
 ''');
+}
+
+/// Creates a Dart project at [dir] whose `hook/build.dart` calls
+/// `package:hooks` build with [hookBody] inserted into the closure.
+///
+/// Builds a `package_config.json` that points at `package:hooks` and its
+/// transitive dependencies via the host test runner's already-resolved
+/// package_config - which is the only way to compile the hook without
+/// shelling out to `dart pub get` (and without making the test depend on
+/// network access).
+Future<void> _createProjectWithBuildHook({
+  required String dir,
+  required String hookBody,
+}) async {
+  await Directory(p.join(dir, '.dart_tool')).create(recursive: true);
+  await Directory(p.join(dir, 'hook')).create(recursive: true);
+
+  await File(p.join(dir, 'pubspec.yaml')).writeAsString('''
+name: test_server
+environment:
+  sdk: ^3.10.0
+dependencies:
+  hooks: ^1.0.0
+''');
+
+  await File(p.join(dir, 'hook', 'build.dart')).writeAsString('''
+import 'package:hooks/hooks.dart';
+
+void main(List<String> args) async {
+  await build(args, (input, output) async {
+    $hookBody
+  });
+}
+''');
+
+  // Inherit every package from the test runner's own package_config.json so
+  // `package:hooks` and its full transitive dep tree (yaml, pub_semver,
+  // record_use, meta, ...) resolve without `dart pub get`. The hook only
+  // imports `package:hooks`; the extras are harmless on the lookup path.
+  final hostConfig = await pc.findPackageConfig(Directory.current);
+  if (hostConfig == null) {
+    throw StateError(
+      'Could not locate the host package_config.json from '
+      '${Directory.current.path}. Run `dart pub get` first.',
+    );
+  }
+
+  // Sanity-check that the host has hooks resolved. If this fails the test
+  // won't compile the hook, so a clear error here beats the kernel-compile
+  // mess downstream.
+  if (!hostConfig.packages.any((p) => p.name == 'hooks')) {
+    throw StateError(
+      'Host package_config.json does not include `hooks`; '
+      'run `dart pub get` in the serverpod_cli package.',
+    );
+  }
+
+  final entries = <Map<String, Object?>>[
+    {
+      'name': 'test_server',
+      'rootUri': '../',
+      'packageUri': 'lib/',
+      'languageVersion': '3.10',
+    },
+    for (final pkg in hostConfig.packages)
+      {
+        'name': pkg.name,
+        'rootUri': pkg.root.toString(),
+        'packageUri': 'lib/',
+        'languageVersion': pkg.languageVersion?.toString() ?? '3.0',
+      },
+  ];
+
+  await File(p.join(dir, '.dart_tool', 'package_config.json')).writeAsString(
+    '{\n'
+    '  "configVersion": 2,\n'
+    '  "packages": [\n'
+    '${entries.map(_encodeEntry).join(',\n')}\n'
+    '  ]\n'
+    '}\n',
+  );
+
+  // hooks_runner only requires that this file exists alongside
+  // package_config.json; the contents are not used to drive hook compilation.
+  await File(p.join(dir, '.dart_tool', 'package_graph.json')).writeAsString('''
+{
+  "roots": ["test_server"],
+  "packages": [
+    {
+      "name": "test_server",
+      "version": "1.0.0",
+      "dependencies": ["hooks"],
+      "devDependencies": []
+    }
+  ],
+  "configVersion": 1
+}
+''');
+}
+
+String _encodeEntry(Map<String, Object?> entry) {
+  final fields = entry.entries
+      .map((e) => '      "${e.key}": "${e.value}"')
+      .join(',\n');
+  return '    {\n$fields\n    }';
 }
 
 /// Resolves the dart executable from the SDK currently running these tests.
