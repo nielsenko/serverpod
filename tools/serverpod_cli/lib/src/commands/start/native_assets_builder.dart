@@ -90,15 +90,15 @@ class NativeAssetsBuilder {
   final String dartExecutable;
 
   /// The server package directory. The package_config.json lives either here
-  /// (standalone) or in the workspace root above it; [discoverPaths] walks
-  /// up to find it.
+  /// (standalone) or in the workspace root above it; [discoverProjectRoot]
+  /// walks up to find it.
   final String serverDir;
 
   /// Output directory for the assets and the manifest yaml (typically
   /// `<serverDir>/.dart_tool/serverpod/native_assets/`).
   final String outputDir;
 
-  Future<ResolvedPaths>? _pathsFuture;
+  Future<String>? _projectRootFuture;
   Future<hr.PackageLayout>? _packageLayoutFuture;
   Future<hr.NativeAssetsBuildRunner>? _runnerFuture;
   String? _lastManifestContent;
@@ -124,7 +124,7 @@ class NativeAssetsBuilder {
   /// generated. Call after a `pub get` or other change that adds or removes
   /// packages with build hooks.
   void reset() {
-    _pathsFuture = null;
+    _projectRootFuture = null;
     _packageLayoutFuture = null;
     _runnerFuture = null;
     _lastManifestContent = null;
@@ -132,11 +132,15 @@ class NativeAssetsBuilder {
   }
 
   /// Walks up from [serverDir] to the first pubspec that is *not* a workspace
-  /// member (i.e. `resolution != 'workspace'`). That directory is either the
-  /// workspace root (when a workspace is in use) or the package itself (when
-  /// it isn't). Pub places `.dart_tool/` only at that root.
+  /// member (i.e. `resolution != 'workspace'`). The directory containing that
+  /// pubspec is either the workspace root (when a workspace is in use) or the
+  /// package itself (when it isn't); pub places `.dart_tool/` only there.
+  ///
+  /// Validates that `package_config.json` and `package_graph.json` exist
+  /// alongside the pubspec, so callers can trust the returned root without
+  /// re-checking.
   @visibleForTesting
-  Future<ResolvedPaths> discoverPaths() async {
+  Future<String> discoverProjectRoot() async {
     var dir = p.canonicalize(serverDir);
     while (true) {
       final pubspec = await tryParsePubspecAt(dir);
@@ -149,10 +153,7 @@ class NativeAssetsBuilder {
             'package_config.json / package_graph.json. Run `dart pub get`.',
           );
         }
-        return ResolvedPaths(
-          packageConfigPath: cfg,
-          workspacePubspecPath: p.join(dir, 'pubspec.yaml'),
-        );
+        return dir;
       }
       final parent = p.dirname(dir);
       if (parent == dir) {
@@ -167,8 +168,10 @@ class NativeAssetsBuilder {
   }
 
   Future<hr.PackageLayout> _loadPackageLayout() async {
-    final paths = await (_pathsFuture ??= discoverPaths());
-    final pkgConfigUri = Uri.file(paths.packageConfigPath);
+    final root = await (_projectRootFuture ??= discoverProjectRoot());
+    final pkgConfigUri = Uri.file(
+      p.join(root, '.dart_tool', 'package_config.json'),
+    );
 
     // Run the package_config load and the server pubspec read in parallel.
     final (packageConfig, serverPubspec) = await (
@@ -190,14 +193,14 @@ class NativeAssetsBuilder {
 
   Future<hr.NativeAssetsBuildRunner> _createRunner() async {
     final layout = await (_packageLayoutFuture ??= _loadPackageLayout());
-    final paths = await (_pathsFuture ??= discoverPaths());
+    final root = await (_projectRootFuture ??= discoverProjectRoot());
     return hr.NativeAssetsBuildRunner(
       dartExecutable: Uri.file(dartExecutable),
       logger: _logger,
       fileSystem: _fileSystem,
       packageLayout: layout,
       userDefines: hr.UserDefines(
-        workspacePubspec: Uri.file(paths.workspacePubspecPath),
+        workspacePubspec: Uri.file(p.join(root, 'pubspec.yaml')),
       ),
     );
   }
@@ -328,21 +331,6 @@ const _encodedAssetsEq = ListEquality<EncodedAsset>();
 /// only ever build for the current machine, so hooks compile against the same
 /// floor as `dart run`.
 const _minMacOSVersion = 13;
-
-/// Paths resolved by [NativeAssetsBuilder.discoverPaths].
-///
-/// [packageConfigPath] is the absolute path to `.dart_tool/package_config.json`
-/// (lives at the workspace root when a workspace is in use, or at the
-/// package itself otherwise). [workspacePubspecPath] is the absolute path to
-/// the `pubspec.yaml` next to it - the same directory.
-class ResolvedPaths {
-  final String packageConfigPath;
-  final String workspacePubspecPath;
-  const ResolvedPaths({
-    required this.packageConfigPath,
-    required this.workspacePubspecPath,
-  });
-}
 
 /// Routes a single `hooks_runner` log record into the serverpod CLI logger.
 ///
