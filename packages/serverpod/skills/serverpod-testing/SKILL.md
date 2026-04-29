@@ -1,11 +1,11 @@
 ---
 name: serverpod-testing
-description: Test Serverpod endpoints and business logic — withServerpod, sessionBuilder, authentication, DB seeding, rollback, streams, running tests. Use when writing server tests or working with serverpod_test.
+description: Test Serverpod endpoints and business logic - withServerpod, sessionBuilder, authentication, DB seeding, rollback, streams, running tests. Use when writing server tests or working with serverpod_test.
 ---
 
 # Serverpod Testing
 
-Generated test tools let you call endpoints in tests with full server context (DB, caching, etc.). Import the **generated** test tools file, not `serverpod_test` directly — it re-exports everything needed.
+Generated test tools let you call endpoints in tests with full server context (DB, caching, etc.). Import the **generated** test tools file, not `serverpod_test` directly - it re-exports everything needed.
 
 ## Basic test
 
@@ -29,6 +29,8 @@ Start DB before running: `docker compose up -d`, then `dart test`.
 
 Use `sessionBuilder.copyWith(...)` to create modified sessions. Call `sessionBuilder.build()` to get a `Session` for DB operations or passing to helpers.
 
+> **Important:** Both `sessionBuilder.build()` and `sessionBuilder.copyWith()` only work after the framework's `setUpAll` has run. Calling them at the top of the `withServerpod` closure body (declaration time) throws `LateInitializationError` and prevents the test file from loading. Always defer them into `setUp`, `setUpAll`, `tearDown`, or the test body.
+
 ### Authenticated tests
 
 ```dart
@@ -36,9 +38,12 @@ withServerpod('Given AuthEndpoint', (sessionBuilder, endpoints) {
   final userId = '550e8400-e29b-41d4-a716-446655440000';
 
   group('when authenticated', () {
-    var authed = sessionBuilder.copyWith(
-      authentication: AuthenticationOverride.authenticationInfo(userId, {Scope('user')}),
-    );
+    late TestSessionBuilder authed;
+    setUp(() {
+      authed = sessionBuilder.copyWith(
+        authentication: AuthenticationOverride.authenticationInfo(userId, {Scope('user')}),
+      );
+    });
 
     test('then hello succeeds', () async {
       final greeting = await endpoints.authExample.hello(authed, 'Michael');
@@ -47,9 +52,12 @@ withServerpod('Given AuthEndpoint', (sessionBuilder, endpoints) {
   });
 
   group('when unauthenticated', () {
-    var unauthed = sessionBuilder.copyWith(
-      authentication: AuthenticationOverride.unauthenticated(),
-    );
+    late TestSessionBuilder unauthed;
+    setUp(() {
+      unauthed = sessionBuilder.copyWith(
+        authentication: AuthenticationOverride.unauthenticated(),
+      );
+    });
 
     test('then hello throws', () async {
       await expectLater(
@@ -65,7 +73,8 @@ withServerpod('Given AuthEndpoint', (sessionBuilder, endpoints) {
 
 ```dart
 withServerpod('Given Products endpoint', (sessionBuilder, endpoints) {
-  var session = sessionBuilder.build();
+  late Session session;
+  setUp(() => session = sessionBuilder.build());
 
   setUp(() async {
     await Product.db.insert(session, [
@@ -81,14 +90,14 @@ withServerpod('Given Products endpoint', (sessionBuilder, endpoints) {
 });
 ```
 
-No manual tearDown needed — by default each test runs in a transaction that is rolled back.
+No manual tearDown needed - by default each test runs in a transaction that is rolled back.
 
 ## Rollback behavior
 
-Default: `RollbackDatabase.afterEach` — each test in a rolled-back transaction.
+Default: `RollbackDatabase.afterEach` - each test in a rolled-back transaction.
 
-- `afterAll` — roll back after all tests in the group. Useful for scenario tests where consecutive tests depend on each other and setup is expensive.
-- `disabled` — no automatic rollback. Required when endpoint code uses concurrent `session.db.transaction(...)` calls (nested transactions would throw `InvalidConfigurationException`). Clean up manually in `tearDownAll`; consider `--concurrency=1`.
+- `afterAll` - roll back after all tests in the group. Useful for scenario tests where consecutive tests depend on each other and setup is expensive.
+- `disabled` - no automatic rollback. Required when endpoint code uses concurrent `session.db.transaction(...)` calls (nested transactions would throw `InvalidConfigurationException`). Clean up manually in `tearDownAll`; consider `--concurrency=1`.
 
 ```dart
 withServerpod(
@@ -113,7 +122,8 @@ If logic lives outside endpoints but needs a `Session`, use `withServerpod` and 
 
 ```dart
 withServerpod('Given product quantity is zero', (sessionBuilder, _) {
-  var session = sessionBuilder.build();
+  late Session session;
+  setUp(() => session = sessionBuilder.build());
 
   setUp(() async {
     await Product.db.insertRow(session, Product(id: 123, name: 'Apple', quantity: 0));
@@ -134,10 +144,14 @@ Use `flushEventQueue()` to ensure a generator executes up to its `yield` before 
 
 ```dart
 withServerpod('Given shared stream', (sessionBuilder, endpoints) {
-  final user1 = sessionBuilder.copyWith(
-    authentication: AuthenticationOverride.authenticationInfo('user-1', {}));
-  final user2 = sessionBuilder.copyWith(
-    authentication: AuthenticationOverride.authenticationInfo('user-2', {}));
+  late TestSessionBuilder user1;
+  late TestSessionBuilder user2;
+  setUp(() {
+    user1 = sessionBuilder.copyWith(
+      authentication: AuthenticationOverride.authenticationInfo('user-1', {}));
+    user2 = sessionBuilder.copyWith(
+      authentication: AuthenticationOverride.authenticationInfo('user-2', {}));
+  });
 
   test('when posting numbers then listener receives them', () async {
     var stream = endpoints.comm.listenForNumbers(user1);
@@ -177,28 +191,30 @@ dart test -t integration --concurrency=1  # Sequential (for rollback disabled)
 
 Exported from generated test tools:
 
-- `ServerpodUnauthenticatedException` — endpoint called without auth
-- `ServerpodInsufficientAccessException` — auth key lacks required scope
-- `ConnectionClosedException` — stream connection closed with error
-- `InvalidConfigurationException` — invalid config (e.g. nested transactions with rollback enabled)
+- `ServerpodUnauthenticatedException` - endpoint called without auth
+- `ServerpodInsufficientAccessException` - auth key lacks required scope
+- `ConnectionClosedException` - stream connection closed with error
+- `InvalidConfigurationException` - invalid config (e.g. nested transactions with rollback enabled)
 
 ## DB connection limits
 
-Each `withServerpod` lazily creates a Serverpod instance on first `sessionBuilder.build()`. With many concurrent tests, DB connections can exceed limits. Fix: raise the DB limit, or defer `build()` to `setUpAll`:
+`sessionBuilder.build()` always runs inside `setUp`/`setUpAll`/`test` (see Session builder section). For shared connections across tests in a group, prefer `setUpAll` over per-test `setUp`:
 
 ```dart
 withServerpod('Given example', (sessionBuilder, endpoints) {
   late Session session;
-  setUpAll(() { session = sessionBuilder.build(); });
+  setUpAll(() => session = sessionBuilder.build());
   // ...
 });
 ```
+
+Trade-off: `setUpAll` creates one shared `Session` for the group (saves connections); `setUp` creates one per test (better isolation). Both share the underlying transaction manager, so DB visibility is identical.
 
 ## Project structure
 
 Keep tests organized:
 
-- `test/unit/` — unit tests (no Serverpod dependency)
-- `test/integration/` — tests using `withServerpod`
+- `test/unit/` - unit tests (no Serverpod dependency)
+- `test/integration/` - tests using `withServerpod`
 
-Always call endpoints via the `endpoints` parameter, not by instantiating endpoint classes directly — the test tools handle lifecycle and validation to match production behavior.
+Always call endpoints via the `endpoints` parameter, not by instantiating endpoint classes directly - the test tools handle lifecycle and validation to match production behavior.
