@@ -88,11 +88,31 @@ void main() {
     });
 
     test(
-      'when build is called from the member dir, '
-      'then path discovery walks up to the workspace root',
+      'when discoverPaths is called from the member dir, '
+      'then it returns the workspace root pubspec and package_config',
       () async {
-        final outcome = await builder.build();
-        expect(outcome, isA<NativeAssetsBuildSkipped>());
+        final paths = await builder.discoverPaths();
+
+        expect(
+          p.equals(
+            paths.workspacePubspecPath,
+            p.join(tempDir.path, 'pubspec.yaml'),
+          ),
+          isTrue,
+          reason:
+              'workspacePubspecPath should be the root pubspec, not the '
+              'member pubspec. Got: ${paths.workspacePubspecPath}',
+        );
+        expect(
+          p.equals(
+            paths.packageConfigPath,
+            p.join(tempDir.path, '.dart_tool', 'package_config.json'),
+          ),
+          isTrue,
+          reason:
+              'packageConfigPath should be at the workspace root .dart_tool/. '
+              'Got: ${paths.packageConfigPath}',
+        );
       },
       timeout: const Timeout(Duration(seconds: 60)),
     );
