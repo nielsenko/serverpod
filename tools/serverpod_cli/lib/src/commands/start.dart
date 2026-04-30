@@ -471,19 +471,6 @@ Future<int> _startWatchSession({
       return 1;
     }
 
-    // IDE reload callback: compile incrementally and return the dill path.
-    Future<String?> onReloadRequested() async {
-      await compiler!.reset();
-      final result = await compileWithProgress(
-        'Compiling server (IDE reload)',
-        compiler,
-        rejectOnFailure: true,
-      );
-      if (result == null) return null;
-      compiler.accept();
-      return result.dillOutput ?? initialDill;
-    }
-
     serverProcessFactory =
         (
           String dillPath, {
@@ -495,7 +482,6 @@ Future<int> _startWatchSession({
             dartExecutable: compiler!.dartExecutable,
             enableVmService: true,
             vmServiceInfoFile: podInfoFile,
-            onReloadRequested: onReloadRequested,
           );
           await serverProcess.start(dillPath: dillPath);
           await serverProcess.connectToVmService();
@@ -810,19 +796,9 @@ Future<void> _runTuiBackend({
     final stdoutSink = TuiLogSink(holder);
     final stderrSink = TuiLogSink(holder);
 
-    // IDE reload callback.
-    Future<String?> onReloadRequested() async {
-      await compiler.reset();
-      final result = await compileWithProgress(
-        'Compiling server (IDE reload)',
-        compiler,
-        rejectOnFailure: true,
-      );
-      if (result == null) return null;
-      compiler.accept();
-      return result.dillOutput ?? initialDill;
-    }
-
+    // Late so the proxy interceptor can capture session.forceReload before
+    // session is constructed; the closure body only runs when the IDE
+    // calls reloadSources, by which point session is set.
     late final WatchSession session;
     VmServiceProxy? proxy;
 
@@ -840,7 +816,6 @@ Future<void> _runTuiBackend({
             dartExecutable: compiler.dartExecutable,
             enableVmService: true,
             vmServiceInfoFile: podInfoFile,
-            onReloadRequested: onReloadRequested,
             stdoutSink: stdoutSink,
             stderrSink: stderrSink,
           );
