@@ -10,23 +10,16 @@
         },
         {
             "name": "projectname_server",
-            "cwd": "${workspaceFolder}/projectname_server",
-            "request": "launch",
             "type": "dart",
-            // {{#docker}}
-            "preLaunchTask": "docker_compose_up",
-            // {{/docker}}
-            "program": "bin/main.dart",
-            // {{#postgres}}
-            "env": {
-                "SERVERPOD_PASSWORD_database": "DB_PASSWORD"
-            },
-            // {{/postgres}}
-            // {{#database}}
-            "args": [
-                "--apply-migrations"
-            ]
-            // {{/database}}
+            "request": "attach",
+            "vmServiceInfoFile": "${workspaceFolder}/projectname_server/.dart_tool/serverpod/vm-service-info.json",
+            "preLaunchTask": "serverpod_start"
+        },
+        {
+            "name": "projectname_server (attach only)",
+            "type": "dart",
+            "request": "attach",
+            "vmServiceInfoFile": "${workspaceFolder}/projectname_server/.dart_tool/serverpod/vm-service-info.json"
         }
     ],
     "compounds": [

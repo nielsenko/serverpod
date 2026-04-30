@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "serverpod_start",
+      "type": "shell",
+      "command": "serverpod",
+      "args": [
+        "start",
+        "--watch",
+        "--no-tui",
+        // {{#database}}
+        "--",
+        "--apply-migrations"
+        // {{/database}}
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/projectname_server",
+        // {{#postgres}}
+        "env": {
+          "SERVERPOD_PASSWORD_database": "DB_PASSWORD"
+        }
+        // {{/postgres}}
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": {
+        "owner": "serverpod",
+        "pattern": [
+          {
+            "regexp": "^.*$",
+            "file": 1,
+            "location": 2,
+            "message": 0
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          // endsPattern is matched against the log line written by serverpod_cli.
+          // If you rename that line, update this regex too.
+          "beginsPattern": "Starting server in watch mode",
+          "endsPattern": "VM service proxy listening on"
+        }
+      }
+    }
+  ]
+}
