@@ -104,62 +104,69 @@ void main() {
     );
   });
 
-  group('Given a project with a build hook that emits no assets', () {
-    late Directory tempDir;
-    late NativeAssetsBuilder builder;
+  group(
+    'Given a project with a build hook that emits no assets',
+    () {
+      late Directory tempDir;
+      late NativeAssetsBuilder builder;
 
-    setUp(() async {
-      tempDir = await Directory.systemTemp.createTemp(
-        'native_assets_builder_hook_test_',
-      );
-      await _createProjectWithBuildHook(
-        dir: tempDir.path,
-        hookBody: '// No assets emitted.',
-      );
-      builder = NativeAssetsBuilder(
-        dartExecutable: _dartExecutable(),
-        serverDir: tempDir.path,
-        outputDir: p.join(tempDir.path, '.dart_tool', 'serverpod', 'na'),
-      );
-    });
-
-    tearDown(() async {
-      await tempDir.deleteWithRetry(recursive: true);
-    });
-
-    test(
-      'when build is called, '
-      'then it returns NativeAssetsBuildSuccess with no manifest',
-      () async {
-        final outcome = await builder.build();
-
-        expect(outcome, isA<NativeAssetsBuildSuccess>());
-        final success = outcome as NativeAssetsBuildSuccess;
-        expect(
-          success.manifestPath,
-          isNull,
-          reason:
-              'A hook that emits no assets should produce no manifest yaml. '
-              'manifestChanged=${success.manifestChanged}',
+      setUp(() async {
+        tempDir = await Directory.systemTemp.createTemp(
+          'native_assets_builder_hook_test_',
         );
-        expect(File(builder.manifestPath).existsSync(), isFalse);
-      },
-      timeout: const Timeout(Duration(minutes: 2)),
-    );
+        await _createProjectWithBuildHook(
+          dir: tempDir.path,
+          hookBody: '// No assets emitted.',
+        );
+        builder = NativeAssetsBuilder(
+          dartExecutable: _dartExecutable(),
+          serverDir: tempDir.path,
+          outputDir: p.join(tempDir.path, '.dart_tool', 'serverpod', 'na'),
+        );
+      });
 
-    test(
-      'when build is called twice, '
-      'then the second call reports the manifest as unchanged',
-      () async {
-        await builder.build();
-        final second = await builder.build();
+      tearDown(() async {
+        await tempDir.deleteWithRetry(recursive: true);
+      });
 
-        expect(second, isA<NativeAssetsBuildSuccess>());
-        expect((second as NativeAssetsBuildSuccess).manifestChanged, isFalse);
-      },
-      timeout: const Timeout(Duration(minutes: 2)),
-    );
-  });
+      test(
+        'when build is called, '
+        'then it returns NativeAssetsBuildSuccess with no manifest',
+        () async {
+          final outcome = await builder.build();
+
+          expect(outcome, isA<NativeAssetsBuildSuccess>());
+          final success = outcome as NativeAssetsBuildSuccess;
+          expect(
+            success.manifestPath,
+            isNull,
+            reason:
+                'A hook that emits no assets should produce no manifest yaml. '
+                'manifestChanged=${success.manifestChanged}',
+          );
+          expect(File(builder.manifestPath).existsSync(), isFalse);
+        },
+        timeout: const Timeout(Duration(minutes: 2)),
+      );
+
+      test(
+        'when build is called twice, '
+        'then the second call reports the manifest as unchanged',
+        () async {
+          await builder.build();
+          final second = await builder.build();
+
+          expect(second, isA<NativeAssetsBuildSuccess>());
+          expect((second as NativeAssetsBuildSuccess).manifestChanged, isFalse);
+        },
+        timeout: const Timeout(Duration(minutes: 2)),
+      );
+    },
+    skip: Platform.isWindows
+        ? 'hooks_runner subprocesses keep .dart_tool handles open on Windows '
+              'long enough to race tearDown — see CI run 25155561001'
+        : null,
+  );
 }
 
 /// Creates a Dart workspace at [rootDir] with one member at [memberDir].
