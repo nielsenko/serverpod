@@ -9,10 +9,12 @@ extension FileSystemEntityDeleteWithRetry on FileSystemEntity {
   /// [delete] can race with process exit on Windows.
   Future<void> deleteWithRetry({
     bool recursive = false,
-    int attempts = 10,
-    Duration delay = const Duration(milliseconds: 200),
+    int attempts = 30,
+    Duration initialDelay = const Duration(milliseconds: 100),
+    Duration maxDelay = const Duration(seconds: 2),
   }) async {
     if (!await exists()) return;
+    var delay = initialDelay;
     for (var i = 0; i < attempts; i++) {
       try {
         await delete(recursive: recursive);
@@ -20,6 +22,8 @@ extension FileSystemEntityDeleteWithRetry on FileSystemEntity {
       } on PathAccessException {
         if (i == attempts - 1) rethrow;
         await Future<void>.delayed(delay);
+        final next = delay * 2;
+        delay = next > maxDelay ? maxDelay : next;
       }
     }
   }
