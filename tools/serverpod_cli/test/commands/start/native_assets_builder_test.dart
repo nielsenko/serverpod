@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/commands/start/native_assets_builder.dart';
 import 'package:test/test.dart';
 
+import '../../test_util/file_system_entity_helpers.dart';
+
 void main() {
   group('Given a project with no packages that have build hooks', () {
     late Directory tempDir;
@@ -23,9 +25,7 @@ void main() {
     });
 
     tearDown(() async {
-      if (await tempDir.exists()) {
-        await tempDir.delete(recursive: true);
-      }
+      await tempDir.deleteWithRetry(recursive: true);
     });
 
     test(
@@ -83,9 +83,7 @@ void main() {
     });
 
     tearDown(() async {
-      if (await tempDir.exists()) {
-        await tempDir.delete(recursive: true);
-      }
+      await tempDir.deleteWithRetry(recursive: true);
     });
 
     test(
@@ -126,9 +124,7 @@ void main() {
     });
 
     tearDown(() async {
-      if (await tempDir.exists()) {
-        await tempDir.delete(recursive: true);
-      }
+      await tempDir.deleteWithRetry(recursive: true);
     });
 
     test(
