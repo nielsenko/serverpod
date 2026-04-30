@@ -14,12 +14,6 @@
             "request": "attach",
             "vmServiceInfoFile": "${workspaceFolder}/projectname_server/.dart_tool/serverpod/vm-service-info.json",
             "preLaunchTask": "serverpod_start"
-        },
-        {
-            "name": "projectname_server (attach only)",
-            "type": "dart",
-            "request": "attach",
-            "vmServiceInfoFile": "${workspaceFolder}/projectname_server/.dart_tool/serverpod/vm-service-info.json"
         }
     ],
     "compounds": [
