@@ -3,43 +3,30 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
-import 'package:serverpod_shared/process_io.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
 /// Snapshot of a running Flutter app, written by [FlutterProcess.start]
 /// after the VM service comes up and used by the next session to decide
 /// whether to spawn a fresh `flutter run` or attach to the existing app.
+///
+/// Liveness is checked by probing [vmServiceUri] over HTTP - if it
+/// answers, an attach will work; if it doesn't, no PID-liveness check
+/// would have helped anyway.
 class FlutterRuntimeInfo {
   const FlutterRuntimeInfo({
-    required this.appId,
-    required this.daemonId,
     required this.vmServiceUri,
-    required this.pid,
     required this.device,
     required this.flutterPackageDir,
     required this.createdAt,
   });
 
-  /// The serverpod companion-app config id this snapshot belongs to. Stable
-  /// across sessions; names the runtime-info file (`flutter-runtime-<appId>`).
-  final String appId;
-
-  /// The Flutter daemon's app id from the `app.start` event. Ephemeral - a
-  /// fresh `flutter run` gets a new one - and unused by reattach, which
-  /// connects via [vmServiceUri]; retained for diagnostics.
-  final String daemonId;
-
   final String vmServiceUri;
-  final int pid;
   final String device;
   final String flutterPackageDir;
   final DateTime createdAt;
 
   Map<String, Object?> toJson() => {
-    'appId': appId,
-    'daemonId': daemonId,
     'vmServiceUri': vmServiceUri,
-    'pid': pid,
     'device': device,
     'flutterPackageDir': flutterPackageDir,
     'createdAt': createdAt.toIso8601String(),
@@ -48,10 +35,7 @@ class FlutterRuntimeInfo {
   static FlutterRuntimeInfo? fromJson(Map<String, Object?> json) {
     try {
       return FlutterRuntimeInfo(
-        appId: json['appId'] as String,
-        daemonId: json['daemonId'] as String,
         vmServiceUri: json['vmServiceUri'] as String,
-        pid: json['pid'] as int,
         device: json['device'] as String,
         flutterPackageDir: json['flutterPackageDir'] as String,
         createdAt: DateTime.parse(json['createdAt'] as String),
@@ -85,13 +69,14 @@ Future<FlutterRuntimeInfo?> readFlutterRuntimeInfo(
   }
 }
 
-/// Writes [info] to its app's runtime-info file, named after [info.appId] so
-/// the file name and the recorded id can't drift apart.
+/// Writes [info] to [appId]'s runtime-info file. The id keys the file name
+/// (`flutter-runtime-<appId>.json`) but is not part of the persisted payload.
 Future<void> writeFlutterRuntimeInfo(
   String serverpodToolDir,
+  String appId,
   FlutterRuntimeInfo info,
 ) async {
-  final file = File(flutterRuntimeInfoPath(serverpodToolDir, info.appId));
+  final file = File(flutterRuntimeInfoPath(serverpodToolDir, appId));
   await file.parent.create(recursive: true);
   await file.writeAsString(jsonEncode(info.toJson()));
 }
@@ -105,10 +90,14 @@ Future<void> deleteFlutterRuntimeInfo(
   ).deleteIfExists();
 }
 
-/// True when [info] still refers to a live process whose VM service is
-/// reachable AND it was spawned against the same flutter package dir
-/// + device combination as the caller is asking about. Used to decide
-/// reattach vs. fresh spawn.
+/// True when [info]'s VM service URI is reachable AND it was spawned
+/// against the same flutter package dir + device combination as the
+/// caller is asking about. Used to decide reattach vs. fresh spawn.
+///
+/// Liveness is "can I open the URI" - that's what reattach actually
+/// needs. A separate PID check would add nothing: native apps host
+/// the VM service inside their own dart VM (URI dies with app); web
+/// builds host it in DWDS inside flutter_tools (URI dies with that).
 Future<bool> isFlutterRuntimeUsable(
   FlutterRuntimeInfo info, {
   required String currentFlutterPackageDir,
@@ -119,7 +108,6 @@ Future<bool> isFlutterRuntimeUsable(
       p.normalize(p.absolute(currentFlutterPackageDir))) {
     return false;
   }
-  if (!isProcessAlive(info.pid)) return false;
   return _vmServiceReachable(info.vmServiceUri);
 }
 

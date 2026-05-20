@@ -420,42 +420,22 @@ class FlutterProcess {
   Future<void> _writeRuntimeInfo() async {
     final dir = _runtimeInfoDir;
     final appId = _runtimeInfoAppId;
-    final daemonId = _daemonAppId;
     final uri = _vmServiceUri;
-    final vm = _vmService;
-    if (dir == null ||
-        appId == null ||
-        daemonId == null ||
-        uri == null ||
-        vm == null) {
-      return;
-    }
-    // The app's dart VM PID, not flutter_tools'. flutter_tools is
-    // SIGKILLed at exit so its PID would always read as dead on the
-    // next session; the app PID survives across our process boundary
-    // and is what the reattach check probes for liveness.
-    int? appPid;
-    try {
-      appPid = (await vm.getVM()).pid;
-    } catch (e) {
-      log.debug('vmService.getVM() failed: $e (using flutter_tools PID)');
-    }
-    final pid = appPid ?? _process?.pid;
-    if (pid == null) return;
+    // appId keys the per-app runtime-info file; dir and uri are the only
+    // payload the reattach check needs (liveness is a URI probe, not a PID).
+    if (dir == null || appId == null || uri == null) return;
     try {
       await writeFlutterRuntimeInfo(
         dir,
+        appId,
         FlutterRuntimeInfo(
-          appId: appId,
-          daemonId: daemonId,
           vmServiceUri: uri,
-          pid: pid,
           device: _device,
           flutterPackageDir: p.absolute(_flutterPackageDir),
           createdAt: DateTime.now(),
         ),
       );
-      log.debug('Flutter runtime info written (pid=$pid, uri=$uri)');
+      log.debug('Flutter runtime info written (uri=$uri)');
     } catch (e) {
       log.debug('Could not write flutter runtime info: $e');
     }
