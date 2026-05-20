@@ -962,6 +962,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       stopFileWatcher: () => fileChangeSub?.cancel(),
       stopDocker: startedDocker ? () => _stopDockerServices(serverDir) : null,
       vmServiceInfoFile: vmServiceInfoFile,
+      serverpodToolDir: serverpodToolDir,
     ),
   );
 }

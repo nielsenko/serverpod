@@ -800,11 +800,21 @@ class FlutterProcess {
     }
   }
 
-  /// Graceful daemon `app.stop` -> SIGINT -> wait -> SIGKILL. The signals
-  /// reach the daemon because [start] spawns flutter_tools directly,
-  /// bypassing wrappers.
+  /// Stop the Flutter process. By default the app is left running so the
+  /// next session can reattach: we SIGKILL `flutter_tools` without letting
+  /// its SIGINT handler call `exitApplication`, so the app (and its raw
+  /// vm-service URI, thanks to `--no-dds`) survives. The runtime-info
+  /// breadcrumb is kept. SIGKILL reaches flutter_tools directly because
+  /// [start] spawns it without wrappers.
+  ///
+  /// When [shutdownApp] is true the app is torn down for good: `app.stop`
+  /// is sent via the daemon so flutter_tools cleanly calls
+  /// `exitApplication` - on web that also closes the browser window it
+  /// spawned, which SIGKILL alone would orphan - then the breadcrumb is
+  /// removed so the next session spawns fresh.
   Future<int> stop({
     Duration timeout = const Duration(seconds: 5),
+    bool shutdownApp = false,
   }) async {
     final process = _process;
     if (process == null) {
@@ -815,48 +825,68 @@ class FlutterProcess {
     await _sigtermSub?.cancel();
     _sigtermSub = null;
 
-    // Ask the daemon to stop the app first: in --machine mode a bare SIGINT
-    // can terminate flutter_tools without device cleanup, leaving e.g. the
-    // browser window it spawned open. `app.stop` tears the device session
-    // down properly; signals below remain as the fallback.
-    final daemon = _daemon;
-    final appId = _daemonAppId;
-    if (daemon != null && appId != null) {
-      try {
-        await daemon
-            .sendRequest('app.stop', <String, Object?>{'appId': appId})
-            .timeout(timeout);
-        final exitCode = await process.exitCode.timeout(timeout);
-        log.debug(
-          'Flutter stop: PID ${process.pid} exited gracefully with $exitCode',
-        );
-        await _cleanup();
-        return exitCode;
-      } catch (e) {
-        log.debug(
-          'Flutter stop: app.stop failed ($e); falling back to '
-          'signals.',
-        );
-      }
+    // Only an explicit shutdown takes the app down. `app.stop` makes
+    // flutter_tools call exitApplication on the device - on web that
+    // closes the browser window it spawned, which a bare SIGKILL would
+    // orphan. The breadcrumb is dropped so the next session spawns fresh.
+    if (shutdownApp) {
+      await _appStopOverDaemon(timeout);
+      await _deleteRuntimeInfo();
     }
 
-    log.debug('Flutter stop: sending SIGINT to PID ${process.pid}');
-    process.kill(ProcessSignal.sigint);
-
+    // SIGKILL flutter_tools. On the default path the SIGINT handler is
+    // deliberately bypassed so it can't call exitApplication, leaving the
+    // app (and its raw vm-service URI, via --no-dds) alive for reattach.
+    log.debug('Flutter stop: SIGKILL PID ${process.pid}');
+    process.kill(ProcessSignal.sigkill);
     final exitCode = await process.exitCode.timeout(
       timeout,
       onTimeout: () {
         log.warning(
-          'Flutter did not stop within ${timeout.inSeconds}s, sending SIGKILL.',
+          'Flutter did not exit within ${timeout.inSeconds}s of SIGKILL.',
         );
-        process.kill(ProcessSignal.sigkill);
-        return process.exitCode;
+        return -1;
       },
     );
     log.debug('Flutter stop: PID ${process.pid} exited with $exitCode');
 
     await _cleanup();
     return exitCode;
+  }
+
+  Future<void> _appStopOverDaemon(Duration timeout) async {
+    final daemon = _daemon;
+    final appId = _daemonAppId;
+    if (daemon == null || appId == null) {
+      log.debug('Flutter app.stop: daemon not ready, skipping.');
+      return;
+    }
+    try {
+      await daemon
+          .sendRequest('app.stop', <String, Object?>{'appId': appId})
+          .timeout(timeout);
+      log.debug('Flutter app.stop: device-side app terminated.');
+    } on TimeoutException {
+      log.warning(
+        'Flutter app.stop timed out after ${timeout.inSeconds}s '
+        '(app may still be alive).',
+      );
+    } on FlutterDaemonException catch (e) {
+      log.warning('Flutter app.stop failed: ${e.error}');
+    } catch (e) {
+      log.warning('Flutter app.stop: unexpected error: $e');
+    }
+  }
+
+  Future<void> _deleteRuntimeInfo() async {
+    final dir = _runtimeInfoDir;
+    final appId = _runtimeInfoAppId;
+    if (dir == null || appId == null) return;
+    try {
+      await deleteFlutterRuntimeInfo(dir, appId);
+    } catch (e) {
+      log.debug('Could not remove flutter runtime info: $e');
+    }
   }
 
   /// Parses one `flutter run --machine` line. Machine events are

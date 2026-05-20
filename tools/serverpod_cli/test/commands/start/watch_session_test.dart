@@ -149,7 +149,10 @@ class _FakeServer extends Fake implements ServerProcess {
   }
 
   @override
-  Future<int> stop({Duration timeout = const Duration(seconds: 5)}) async {
+  Future<int> stop({
+    Duration timeout = const Duration(seconds: 5),
+    bool shutdownApp = false,
+  }) async {
     calls.add('stop');
     if (!_exitCodeCompleter.isCompleted) {
       _exitCodeCompleter.complete(0);
@@ -184,7 +187,10 @@ class _FakeFlutter extends Fake implements FlutterProcess {
   }
 
   @override
-  Future<int> stop({Duration timeout = const Duration(seconds: 5)}) async {
+  Future<int> stop({
+    Duration timeout = const Duration(seconds: 5),
+    bool shutdownApp = false,
+  }) async {
     calls.add('stop');
     return 0;
   }

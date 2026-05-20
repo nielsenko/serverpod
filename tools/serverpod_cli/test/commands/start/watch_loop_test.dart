@@ -225,6 +225,7 @@ void main() {
               }
             : null,
         vmServiceInfoFile: vmServiceInfoFile,
+        serverpodToolDir: tempDir.path,
       );
     }
 
@@ -316,6 +317,7 @@ void main() {
           },
           stopDocker: null,
           vmServiceInfoFile: vmServiceInfoFile,
+          serverpodToolDir: tempDir.path,
         );
 
         await ctx.dispose();

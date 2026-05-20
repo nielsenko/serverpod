@@ -8,8 +8,8 @@ import 'package:serverpod_cli/src/analytics/cli_analytics.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_dependency_tracker.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_log_event.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_process.dart';
-import 'package:serverpod_cli/src/commands/start/package_dependency_tracker.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_runtime_info.dart';
+import 'package:serverpod_cli/src/commands/start/package_dependency_tracker.dart';
 import 'package:serverpod_cli/src/config/flutter_app_config.dart';
 import 'package:serverpod_cli/src/util/pubspec_helpers.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
@@ -377,7 +377,11 @@ class FlutterAppManager {
     // The relaunch resets the tab via [onEnsureAppTab]; a stop signal in
     // between would only flash a stopped state.
     runtime.stopSignaled = true;
-    await runtime.process?.stop();
+    // Tear the app down for good (shutdownApp: true). A relaunch must rebuild
+    // - native and asset changes can't hot reload - and the default stop()
+    // leaves the app alive and keeps its reattach breadcrumb, which would make
+    // the launch() below reattach to the very app we are trying to replace.
+    await runtime.process?.stop(shutdownApp: true);
     runtime.process = null;
     await launch(appId);
   }
@@ -389,7 +393,10 @@ class FlutterAppManager {
     final runtime = _runtimeFor(appId);
     if (runtime == null) return;
     runtime.relaunchInProgress = false;
-    await runtime.process?.stop();
+    // Actually terminate the app and clear its reattach breadcrumb
+    // (shutdownApp: true) so a later launch starts fresh rather than
+    // reattaching to a process the user explicitly stopped.
+    await runtime.process?.stop(shutdownApp: true);
     runtime.process = null;
     _signalStopped(runtime);
   }
@@ -454,11 +461,17 @@ class FlutterAppManager {
   }
 
   /// Stops every running app and removes per-app VM-service info files.
-  Future<void> stopAll() async {
+  ///
+  /// When [shutdownApp] is false (default) each Flutter process is left running
+  /// for the next session to reattach and its runtime-info breadcrumb is kept;
+  /// when true the apps are torn down for good and their breadcrumbs removed.
+  /// The VM-service info (IDE proxy) files are always removed since the proxy
+  /// doesn't outlive this CLI process.
+  Future<void> stopAll({bool shutdownApp = false}) async {
     await _runtimes.values.map((runtime) async {
       // Session shutdown; don't churn [onStop] consumers per app.
       runtime.stopSignaled = true;
-      await runtime.process?.stop();
+      await runtime.process?.stop(shutdownApp: shutdownApp);
       runtime.process = null;
       await File(runtime.infoFile).deleteIfExists();
     }).wait;
