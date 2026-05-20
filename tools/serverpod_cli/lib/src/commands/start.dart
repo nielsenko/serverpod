@@ -114,6 +114,17 @@ enum StartOption<V> implements OptionDefinition<V> {
           'auto-launch. Apps can still be started on demand from the TUI.',
     ),
   ),
+  flutterDevfsReload(
+    FlagOption(
+      argName: 'flutter-devfs-reload',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Experimental: drive Flutter hot reload through our own FES + '
+          'DevFS push instead of the daemon-stdin app.restart. Cuts reload '
+          'latency from seconds to ~200ms; non-web only for now.',
+    ),
+  ),
   ;
 
   const StartOption(this.option);
@@ -164,6 +175,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
       watch: commandConfig.value(StartOption.watch),
       flutter: commandConfig.value(StartOption.flutter),
       docker: commandConfig.optionalValue(StartOption.docker),
+      flutterDevfsReload: commandConfig.value(StartOption.flutterDevfsReload),
       serverArgs: argResults?.rest ?? const [],
     );
 
@@ -785,6 +797,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   required bool watch,
   required bool? docker,
   required bool launchFlutterApp,
+  required bool flutterDevfsReload,
   required ShutdownSignal shutdown,
   // Session-wide log retention. Filled here rather than by the presentation
   // layer, so the MCP log tools serve the same content with and without the
@@ -877,6 +890,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       config: RunnerConfig(
         watch: watch,
         flutter: launchFlutterApp,
+        flutterDevfsReload: flutterDevfsReload,
         docker: startDocker,
         serverArgs: requestedServerArgs,
       ),
@@ -1098,6 +1112,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     serverpodToolDir: serverpodToolDir,
     serverPubspecFile: serverPubspecFile,
     serverPackageDirectoryPathParts: config.serverPackageDirectoryPathParts,
+    flutterDevfsReload: flutterDevfsReload,
     onReady: (app, url) => runnerApi.recordFlutterAppState(app.id, url: url),
     onStart: (app, process) => _recordExtensionEvents(
       process.vmService,

@@ -135,6 +135,16 @@ enum RunnerServeOption<V> implements OptionDefinition<V> {
   directory<String>(runnerDirectoryOption),
   docker<bool>(runnerDockerOption),
   flutter<bool>(runnerFlutterOption),
+  flutterDevfsReload(
+    FlagOption(
+      argName: 'flutter-devfs-reload',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Experimental: drive Flutter hot reload through our own FES + DevFS '
+          'push instead of the daemon-stdin app.restart.',
+    ),
+  ),
   detached(
     FlagOption(
       argName: 'detached',
@@ -238,6 +248,9 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
         watch: commandConfig.value(RunnerServeOption.watch),
         docker: commandConfig.optionalValue(RunnerServeOption.docker),
         launchFlutterApp: commandConfig.value(RunnerServeOption.flutter),
+        flutterDevfsReload: commandConfig.value(
+          RunnerServeOption.flutterDevfsReload,
+        ),
         shutdown: shutdown,
         logHistory: logHistory,
         serverStdoutSink: logHistory.serverOutputSink(

@@ -40,6 +40,7 @@ class FlutterAppManager {
   FlutterAppManager({
     required this.serverpodToolDir,
     required this.runMode,
+    this.flutterDevfsReload = false,
     this.onProgress,
     required this.onReady,
     required this.onStart,
@@ -97,6 +98,11 @@ class FlutterAppManager {
   /// Apps are configured and listed in every run mode, but only development
   /// launches them.
   bool get canLaunchApps => runMode == 'development';
+
+  /// When `true`, spawned [FlutterProcess]es drive hot reload through our own
+  /// FES + DevFS push instead of the daemon `app.restart`. Mirrors the
+  /// `--flutter-devfs-reload` CLI flag; applies to every companion app.
+  final bool flutterDevfsReload;
 
   /// Launch progress for a presentation layer that shows stages of its own.
   ///
@@ -316,6 +322,7 @@ class FlutterAppManager {
         for (final define in serverUrlDefines()) '--dart-define=$define',
       ],
       flutterProxy: runtime.proxy,
+      useDevFsReload: flutterDevfsReload,
       flutterExecutable: flutterExecutableForTesting ?? 'flutter',
       machineArgsOverride: argsOverrideForTesting?.call(runtime.app),
       stdoutSink: stdoutSinkFor(runtime.app),
