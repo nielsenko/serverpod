@@ -12,6 +12,7 @@ import 'package:serverpod_shared/serverpod_shared.dart';
 class FlutterRuntimeInfo {
   const FlutterRuntimeInfo({
     required this.appId,
+    required this.daemonId,
     required this.vmServiceUri,
     required this.pid,
     required this.device,
@@ -19,7 +20,15 @@ class FlutterRuntimeInfo {
     required this.createdAt,
   });
 
+  /// The serverpod companion-app config id this snapshot belongs to. Stable
+  /// across sessions; names the runtime-info file (`flutter-runtime-<appId>`).
   final String appId;
+
+  /// The Flutter daemon's app id from the `app.start` event. Ephemeral - a
+  /// fresh `flutter run` gets a new one - and unused by reattach, which
+  /// connects via [vmServiceUri]; retained for diagnostics.
+  final String daemonId;
+
   final String vmServiceUri;
   final int pid;
   final String device;
@@ -28,6 +37,7 @@ class FlutterRuntimeInfo {
 
   Map<String, Object?> toJson() => {
     'appId': appId,
+    'daemonId': daemonId,
     'vmServiceUri': vmServiceUri,
     'pid': pid,
     'device': device,
@@ -39,6 +49,7 @@ class FlutterRuntimeInfo {
     try {
       return FlutterRuntimeInfo(
         appId: json['appId'] as String,
+        daemonId: json['daemonId'] as String,
         vmServiceUri: json['vmServiceUri'] as String,
         pid: json['pid'] as int,
         device: json['device'] as String,
@@ -51,37 +62,47 @@ class FlutterRuntimeInfo {
   }
 }
 
-/// Path of the runtime-info file inside [serverpodToolDir].
-String flutterRuntimeInfoPath(String serverpodToolDir) =>
-    p.join(serverpodToolDir, 'flutter-runtime.json');
+/// Path of the runtime-info file for the Flutter app [appId] inside
+/// [serverpodToolDir]. Keyed per app so multiple companion apps don't
+/// share (and clobber) a single reattach record.
+String flutterRuntimeInfoPath(String serverpodToolDir, String appId) =>
+    p.join(serverpodToolDir, 'flutter-runtime-$appId.json');
 
-/// Reads the runtime-info file. Returns `null` if missing or malformed.
+/// Reads [appId]'s runtime-info file. Returns `null` if missing or malformed.
 Future<FlutterRuntimeInfo?> readFlutterRuntimeInfo(
   String serverpodToolDir,
+  String appId,
 ) async {
-  final file = File(flutterRuntimeInfoPath(serverpodToolDir));
+  final file = File(flutterRuntimeInfoPath(serverpodToolDir, appId));
   if (!await file.exists()) return null;
   try {
     final decoded = jsonDecode(await file.readAsString());
     if (decoded is! Map<String, Object?>) return null;
     return FlutterRuntimeInfo.fromJson(decoded);
   } catch (e) {
-    log.debug('flutter-runtime.json unreadable: $e');
+    log.debug('flutter-runtime-$appId.json unreadable: $e');
     return null;
   }
 }
 
+/// Writes [info] to its app's runtime-info file, named after [info.appId] so
+/// the file name and the recorded id can't drift apart.
 Future<void> writeFlutterRuntimeInfo(
   String serverpodToolDir,
   FlutterRuntimeInfo info,
 ) async {
-  final file = File(flutterRuntimeInfoPath(serverpodToolDir));
+  final file = File(flutterRuntimeInfoPath(serverpodToolDir, info.appId));
   await file.parent.create(recursive: true);
   await file.writeAsString(jsonEncode(info.toJson()));
 }
 
-Future<void> deleteFlutterRuntimeInfo(String serverpodToolDir) async {
-  await File(flutterRuntimeInfoPath(serverpodToolDir)).deleteIfExists();
+Future<void> deleteFlutterRuntimeInfo(
+  String serverpodToolDir,
+  String appId,
+) async {
+  await File(
+    flutterRuntimeInfoPath(serverpodToolDir, appId),
+  ).deleteIfExists();
 }
 
 /// True when [info] still refers to a live process whose VM service is

@@ -112,7 +112,7 @@ class FlutterProcess {
     _maxRecentRawLogLines,
   );
 
-  String? _appId;
+  String? _daemonAppId;
   FlutterDaemonProtocol? _daemon;
   String? _vmServiceUri;
   String? _flutterAppUrl;
@@ -149,11 +149,21 @@ class FlutterProcess {
 
   final String? _packagesPath;
 
-  /// Directory where `flutter-runtime.json` lives. When set,
-  /// [FlutterProcess] writes the runtime snapshot here after the VM
-  /// service comes up so the next session can detect a surviving app
-  /// and reattach. Removed only on explicit shutdown via [stop].
+  /// Directory where the per-app `flutter-runtime-<appId>.json` snapshot
+  /// lives. When set together with [_runtimeInfoAppId], [FlutterProcess]
+  /// writes the runtime snapshot here after the VM service comes up so the
+  /// next session can detect a surviving app and reattach.
   final String? _runtimeInfoDir;
+
+  /// Identifies which configured Flutter app this process belongs to; keys
+  /// the per-app runtime-info file under [_runtimeInfoDir] so companion apps
+  /// don't clobber each other's reattach state. Null disables the snapshot.
+  final String? _runtimeInfoAppId;
+
+  /// When non-null, [start] spawns `flutter attach --machine --debug-uri`
+  /// at this URI instead of `flutter run` - reusing a surviving app
+  /// from a previous session. Skips the native build entirely.
+  final String? _attachToVmServiceUri;
 
   // `null` result means the process exited before publishing a URI.
   final Completer<String?> _vmServiceUriCompleter = Completer<String?>();
@@ -179,6 +189,8 @@ class FlutterProcess {
     String? entryPoint,
     String? packagesPath,
     String? runtimeInfoDir,
+    String? runtimeInfoAppId,
+    String? attachToVmServiceUri,
     @visibleForTesting List<String>? argsOverrideForTesting,
     @visibleForTesting Future<bool> Function(Uri url)? openBrowserForTesting,
   }) : _flutterPackageDir = flutterPackageDir,
@@ -196,6 +208,8 @@ class FlutterProcess {
        _entryPoint = entryPoint,
        _packagesPath = packagesPath,
        _runtimeInfoDir = runtimeInfoDir,
+       _runtimeInfoAppId = runtimeInfoAppId,
+       _attachToVmServiceUri = attachToVmServiceUri,
        _argsOverrideForTesting = argsOverrideForTesting,
        _openBrowserForTesting = openBrowserForTesting;
 
@@ -238,7 +252,25 @@ class FlutterProcess {
     final args =
         _argsOverrideForTesting ??
         _machineArgsOverride ??
-        <String>['run', '--machine', '-d', device, ..._extraArgs];
+        (_attachToVmServiceUri != null
+            ? <String>[
+                'attach',
+                '--machine',
+                '--no-dds',
+                '-d',
+                device,
+                '--debug-uri',
+                _attachToVmServiceUri,
+                ..._extraArgs,
+              ]
+            : <String>[
+                'run',
+                '--machine',
+                '--no-dds',
+                '-d',
+                device,
+                ..._extraArgs,
+              ]);
 
     final invocation = await _resolveFlutterInvocation(_flutterExecutable);
 
@@ -394,15 +426,23 @@ class FlutterProcess {
 
   Future<void> _writeRuntimeInfo() async {
     final dir = _runtimeInfoDir;
-    final appId = _appId;
+    final appId = _runtimeInfoAppId;
+    final daemonId = _daemonAppId;
     final uri = _vmServiceUri;
     final pid = _process?.pid;
-    if (dir == null || appId == null || uri == null || pid == null) return;
+    if (dir == null ||
+        appId == null ||
+        daemonId == null ||
+        uri == null ||
+        pid == null) {
+      return;
+    }
     try {
       await writeFlutterRuntimeInfo(
         dir,
         FlutterRuntimeInfo(
           appId: appId,
+          daemonId: daemonId,
           vmServiceUri: uri,
           pid: pid,
           device: _device,
@@ -412,7 +452,7 @@ class FlutterProcess {
       );
       log.debug('Flutter runtime info written (pid=$pid, uri=$uri)');
     } catch (e) {
-      log.debug('Could not write flutter-runtime.json: $e');
+      log.debug('Could not write flutter runtime info: $e');
     }
   }
 
@@ -727,7 +767,7 @@ class FlutterProcess {
   Future<bool> _appRestart({required bool fullRestart}) async {
     final op = fullRestart ? 'restart' : 'reload';
     final daemon = _daemon;
-    final appId = _appId;
+    final appId = _daemonAppId;
     if (daemon == null || appId == null) {
       log.warning('Flutter $op: daemon not running yet.');
       return false;
@@ -775,7 +815,7 @@ class FlutterProcess {
     // browser window it spawned open. `app.stop` tears the device session
     // down properly; signals below remain as the fallback.
     final daemon = _daemon;
-    final appId = _appId;
+    final appId = _daemonAppId;
     if (daemon != null && appId != null) {
       try {
         await daemon
@@ -847,7 +887,7 @@ class FlutterProcess {
       switch (event) {
         case 'app.start':
           final appId = paramMap['appId'];
-          if (appId is String) _appId = appId;
+          if (appId is String) _daemonAppId = appId;
         case 'app.debugPort':
           final wsUri = paramMap['wsUri'];
           if (wsUri is String && !_vmServiceUriCompleter.isCompleted) {
