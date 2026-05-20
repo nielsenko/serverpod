@@ -100,6 +100,17 @@ enum StartOption<V> implements OptionDefinition<V> {
           'auto-launch. Apps can still be started on demand from the TUI.',
     ),
   ),
+  flutterDevfsReload(
+    FlagOption(
+      argName: 'flutter-devfs-reload',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Experimental: drive Flutter hot reload through our own FES + '
+          'DevFS push instead of the daemon-stdin app.restart. Cuts reload '
+          'latency from seconds to ~200ms; non-web only for now.',
+    ),
+  ),
   ;
 
   const StartOption(this.option);
@@ -142,6 +153,9 @@ class StartCommand extends ServerpodCommand<StartOption> {
     final watch = commandConfig.value(StartOption.watch);
     final useTui = commandConfig.value(StartOption.tui) && stdout.hasTerminal;
     final launchFlutterApp = commandConfig.value(StartOption.flutter);
+    final flutterDevfsReload = commandConfig.value(
+      StartOption.flutterDevfsReload,
+    );
 
     // In TUI mode, start the UI immediately and do all setup in onReady.
     // This avoids a visible delay from config loading and Docker checks.
@@ -174,6 +188,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
         commandConfig: commandConfig,
         watch: watch,
         launchFlutterApp: launchFlutterApp,
+        flutterDevfsReload: flutterDevfsReload,
         serverArgs: argResults?.rest ?? [],
         config: config,
       );
@@ -239,6 +254,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
         // watcher (watch mode). Without it there is nothing to wait for.
         keepOpenOnFailure: watch,
         launchFlutterApp: launchFlutterApp,
+        flutterDevfsReload: flutterDevfsReload,
         shutdown: shutdown,
         // Nothing renders the history here; it is kept solely so the MCP log
         // tools work the same as they do under the TUI, which also leaves the
@@ -491,6 +507,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
   // `false`, there is no way to recover (non-TUI `--no-watch`), so fail fast.
   required bool keepOpenOnFailure,
   required bool launchFlutterApp,
+  required bool flutterDevfsReload,
   required _ShutdownSignal shutdown,
   // Session-wide log retention. Filled here rather than by the presentation
   // layer, so the MCP log tools serve the same content with and without the
@@ -721,6 +738,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     serverpodToolDir: serverpodToolDir,
     serverPubspecFile: serverPubspecFile,
     serverPackageDirectoryPathParts: config.serverPackageDirectoryPathParts,
+    flutterDevfsReload: flutterDevfsReload,
     onProgress: (app, stage) => onFlutterProgress?.call(app, stage),
     onReady: (app, url) => onFlutterReady?.call(app, url),
     onStart: (app, process) => _recordExtensionEvents(
@@ -1209,6 +1227,7 @@ Future<int> _runWithTui({
   required Configuration<StartOption> commandConfig,
   required bool watch,
   required bool launchFlutterApp,
+  required bool flutterDevfsReload,
   required List<String> serverArgs,
   required GeneratorConfig config,
 }) async {
@@ -1247,6 +1266,7 @@ Future<int> _runWithTui({
       commandConfig: commandConfig,
       watch: watch,
       launchFlutterApp: launchFlutterApp,
+      flutterDevfsReload: flutterDevfsReload,
       serverArgs: serverArgs,
       config: config,
       shutdown: shutdown,
@@ -1310,6 +1330,7 @@ Future<void> _runTuiBackend({
   required Configuration<StartOption> commandConfig,
   required bool watch,
   required bool launchFlutterApp,
+  required bool flutterDevfsReload,
   required List<String> serverArgs,
   required GeneratorConfig config,
   required _ShutdownSignal shutdown,
@@ -1345,6 +1366,7 @@ Future<void> _runTuiBackend({
       // watcher auto-recovers; otherwise the user triggers a rebuild manually.
       keepOpenOnFailure: true,
       launchFlutterApp: launchFlutterApp,
+      flutterDevfsReload: flutterDevfsReload,
       shutdown: shutdown,
       logHistory: holder.state.history,
       // The TUI owns the terminal, so Flutter output is only recorded.

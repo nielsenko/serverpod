@@ -40,6 +40,7 @@ class FlutterAppManager {
   FlutterAppManager({
     required this.serverpodToolDir,
     required this.runMode,
+    this.flutterDevfsReload = false,
     required this.onProgress,
     required this.onReady,
     required this.onStart,
@@ -90,6 +91,12 @@ class FlutterAppManager {
 
   final String serverpodToolDir;
   final String runMode;
+
+  /// When `true`, spawned [FlutterProcess]es drive hot reload through our own
+  /// FES + DevFS push instead of the daemon `app.restart`. Mirrors the
+  /// `--flutter-devfs-reload` CLI flag; applies to every companion app.
+  final bool flutterDevfsReload;
+
   final void Function(FlutterAppConfig app, String stage) onProgress;
 
   /// Fires once per launch when the app is up: on the published web URL
@@ -267,6 +274,7 @@ class FlutterAppManager {
       device: device,
       extraArgs: runtime.app.extraRunArgs,
       flutterProxy: runtime.proxy,
+      useDevFsReload: flutterDevfsReload,
       flutterExecutable: flutterExecutableForTesting ?? 'flutter',
       machineArgsOverride: argsOverrideForTesting?.call(runtime.app),
       stdoutSink: stdoutSinkFor(runtime.app),
