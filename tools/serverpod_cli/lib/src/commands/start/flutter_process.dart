@@ -153,6 +153,7 @@ class FlutterProcess {
   final Completer<String?> _vmServiceUriCompleter = Completer<String?>();
   final Completer<int> _exitCodeCompleter = Completer<int>();
   final Completer<void> _launchedCompleter = Completer<void>();
+  final Completer<void> _appStartedCompleter = Completer<void>();
 
   Completer<void>? _cleanupCompleter;
 
@@ -323,6 +324,9 @@ class FlutterProcess {
         }
         if (!_launchedCompleter.isCompleted) {
           _launchedCompleter.complete();
+        }
+        if (!_appStartedCompleter.isCompleted) {
+          _appStartedCompleter.complete();
         }
         // Abort before exitCode so request awaiters see the failure.
         _daemon?.abort();
@@ -569,27 +573,46 @@ class FlutterProcess {
       );
       return;
     }
-    final entry = _entryPoint ?? p.join(_flutterPackageDir, 'lib', 'main.dart');
-    final packages =
-        _packagesPath ??
-        p.join(_flutterPackageDir, '.dart_tool', 'package_config.json');
-    final outputDill = p.join(
-      _flutterPackageDir,
-      '.dart_tool',
-      'serverpod',
-      'flutter.dill',
+    final pkgDir = p.absolute(_flutterPackageDir);
+    final entry = p.absolute(_entryPoint ?? p.join(pkgDir, 'lib', 'main.dart'));
+    final packages = p.absolute(
+      _packagesPath ?? p.join(pkgDir, '.dart_tool', 'package_config.json'),
     );
-    final compiler = KernelCompiler.flutter(
-      flutterRoot: flutterRoot,
-      entryPoint: entry,
-      outputDill: outputDill,
-      packagesPath: packages,
+    final outputDill = p.absolute(
+      p.join(pkgDir, '.dart_tool', 'serverpod', 'flutter.dill'),
     );
-    await compiler.start();
-    _compiler = compiler;
+    log.debug(
+      'Flutter FES: starting (target=flutter, sdk=$flutterRoot, '
+      'entry=$entry, packages=$packages)',
+    );
+    try {
+      final compiler = KernelCompiler.flutter(
+        flutterRoot: flutterRoot,
+        entryPoint: entry,
+        outputDill: outputDill,
+        packagesPath: packages,
+      );
+      await compiler.start();
+      _compiler = compiler;
+      log.debug('Flutter FES: ready');
+    } catch (e) {
+      log.warning(
+        'Flutter FES failed to start: $e. Falling back to daemon-stdin '
+        'reload.',
+      );
+    }
   }
 
   Future<void> _bringUpDevFs(VmService vmService) async {
+    log.debug('Flutter DevFS: waiting for app.started');
+    try {
+      await _appStartedCompleter.future.timeout(const Duration(minutes: 2));
+    } on TimeoutException {
+      log.warning('Flutter app.started never fired; DevFS reload disabled.');
+      return;
+    }
+    if (_process == null) return;
+
     try {
       final vm = await vmService.getVM();
       final isolates = vm.isolates ?? const [];
@@ -598,16 +621,20 @@ class FlutterProcess {
         return;
       }
       _isolateId = isolates.first.id;
+      log.debug('Flutter DevFS: isolate $_isolateId, creating $_devFsName');
 
       final devFS = DevFS(
         vmService: vmService,
         fsName: _devFsName,
         httpAddress: Uri.parse(_vmServiceUri!),
       );
-      await devFS.create();
+      final baseUri = await devFS.create();
       _devFS = devFS;
+      log.debug('Flutter DevFS: ready at $baseUri');
     } on RPCError catch (e) {
       log.warning('Flutter DevFS bring-up failed: $e');
+    } catch (e) {
+      log.warning('Flutter DevFS bring-up unexpected error: $e');
     }
   }
 
@@ -619,7 +646,7 @@ class FlutterProcess {
     try {
       final result = await compiler.compile(changedPaths: changedPaths);
       if (result.errorCount > 0) {
-        log.warning(
+        log.error(
           'Flutter reload: compile failed:\n'
           '${result.compilerOutputLines.join('\n')}',
         );
@@ -809,6 +836,9 @@ class FlutterProcess {
           }
         case 'app.started':
           _onStarted?.call();
+          if (!_appStartedCompleter.isCompleted) {
+            _appStartedCompleter.complete();
+          }
         case 'app.stop':
           log.debug('Flutter daemon emitted app.stop; tearing down.');
           unawaited(_onAppStop());
