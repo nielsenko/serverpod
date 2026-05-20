@@ -38,6 +38,11 @@ class KernelCompiler {
   bool _needsFullCompile = true;
   bool _started = false;
 
+  /// True when the most recent [compile] call returned an "unchanged"
+  /// result without touching FES. [accept] and [reject] then no-op
+  /// (there's nothing for FES to accept or reject).
+  bool _lastWasNoOp = false;
+
   KernelCompiler({
     required this.entryPoint,
     this.outputDill = '.dart_tool/serverpod/server.dill',
@@ -202,6 +207,13 @@ class KernelCompiler {
   /// [changedPaths] is ignored and a complete kernel is produced.
   /// Otherwise, performs an incremental recompile for [changedPaths].
   ///
+  /// When [changedPaths] is empty and a full compile isn't pending,
+  /// returns a [CompileResult.unchanged] pointing at the existing
+  /// [outputDill] without touching FES. The default fallback in
+  /// `FrontendServerClient.compile` is to invalidate the entrypoint
+  /// when no URIs are given - that triggers FES to re-walk the
+  /// entire dependency graph for nothing. The short-circuit avoids it.
+  ///
   /// When [invalidatePackageConfig] is `true`, the package-config file is
   /// added to the invalidated set. The Frontend Server's incremental compiler
   /// re-reads it and rebuilds its package map in place, so a `package_config`
@@ -211,7 +223,15 @@ class KernelCompiler {
     bool invalidatePackageConfig = false,
   }) async {
     final client = await _client;
+
+    if (!_needsFullCompile && changedPaths.isEmpty) {
+      log.debug('compile: no changes, reusing $outputDill');
+      _lastWasNoOp = true;
+      return CompileResult.unchanged(outputDill);
+    }
+
     final marker = File(_compileMarkerPath)..createSync(recursive: true);
+    _lastWasNoOp = false;
 
     final CompileResult result;
     if (_needsFullCompile) {
@@ -248,14 +268,24 @@ class KernelCompiler {
     return result;
   }
 
-  /// Accept the last compile result.
+  /// Accept the last compile result. No-op when the last compile was
+  /// short-circuited as unchanged (FES has no pending work to accept).
   ///
   /// Awaitable so callers can order it before disposing or reloading; the
   /// underlying FES `accept` is a fire-and-forget stdin write.
-  Future<void> accept() => _client.then((c) => c.accept());
+  Future<void> accept() async {
+    if (_lastWasNoOp) return;
+    final client = await _client;
+    client.accept();
+  }
 
-  /// Reject the last compile result.
-  Future<void> reject() => _client.then((c) => c.reject());
+  /// Reject the last compile result. No-op when the last compile was
+  /// short-circuited as unchanged.
+  Future<void> reject() async {
+    if (_lastWasNoOp) return;
+    final client = await _client;
+    await client.reject();
+  }
 
   /// Reset the compiler so the next [compile] produces a complete kernel.
   ///
