@@ -864,7 +864,14 @@ class WatchSession {
       log.debug('Flutter app $appId not ready; skipping reload.');
       return;
     }
-    final ok = await flutter.reload(changedPaths: changedPaths);
+    var ok = false;
+    await log.progress(
+      'Reloading Flutter',
+      () async {
+        ok = await flutter.reload(changedPaths: changedPaths);
+        return ok;
+      },
+    );
     if (ok) {
       log.info(flutterAppReloaded);
     } else {
