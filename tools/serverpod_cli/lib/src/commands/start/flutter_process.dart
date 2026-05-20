@@ -125,7 +125,6 @@ class FlutterProcess {
   /// of the daemon-stdin `app.restart` round-trip. Set by [start] when
   /// [useDevFsReload] is on; nulled on failure to construct/bring up.
   KernelCompiler? _compiler;
-  Future<void>? _prewarmFuture;
   DevFS? _devFS;
 
   static const _devFsName = 'serverpod_flutter';
@@ -598,31 +597,11 @@ class FlutterProcess {
       await compiler.start();
       _compiler = compiler;
       log.debug('Flutter FES: ready');
-      _prewarmFuture = _prewarmCompiler(compiler);
     } catch (e) {
       log.warning(
         'Flutter FES failed to start: $e. Falling back to daemon-stdin '
         'reload.',
       );
-    }
-  }
-
-  Future<void> _prewarmCompiler(KernelCompiler compiler) async {
-    try {
-      log.debug('Flutter FES: pre-warming compile');
-      final result = await compiler.compile();
-      if (result.errorCount > 0) {
-        log.debug(
-          'Flutter FES pre-warm: ${result.errorCount} errors '
-          '(ignored, first reload will report them)',
-        );
-        await compiler.reject();
-      } else {
-        compiler.accept();
-        log.debug('Flutter FES: pre-warmed');
-      }
-    } catch (e) {
-      log.debug('Flutter FES pre-warm failed: $e (first reload will compile)');
     }
   }
 
@@ -662,7 +641,6 @@ class FlutterProcess {
   }
 
   Future<bool> _devFsReload(Set<String> changedPaths) async {
-    await _prewarmFuture;
     final compiler = _compiler!;
     final devFS = _devFS!;
     final isolateId = _isolateId!;

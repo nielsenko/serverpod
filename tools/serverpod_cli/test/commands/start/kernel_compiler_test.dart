@@ -57,47 +57,13 @@ void main() {
         );
 
         await compiler.start();
-        final result = await compiler.compile();
+        final result = await compiler.ensureWarm();
 
-        expect(result.errorCount, 0);
+        expect(result, isNotNull);
+        expect(result!.errorCount, 0);
         expect(result.dillOutput, isNotEmpty);
         expect(File(outputDill).existsSync(), isTrue);
         expect(File('$outputDill.compiling').existsSync(), isFalse);
-      },
-      timeout: const Timeout(Duration(seconds: 60)),
-    );
-
-    test(
-      'when isDillUpToDate is called with a leftover compile marker, '
-      'then it returns false',
-      () async {
-        await compiler.start();
-        await compiler.compile();
-        await compiler.accept();
-        expect(await compiler.isDillUpToDate({}), isTrue);
-
-        File('${compiler.outputDill}.compiling').createSync();
-
-        expect(await compiler.isDillUpToDate({}), isFalse);
-      },
-      timeout: const Timeout(Duration(seconds: 60)),
-    );
-
-    test(
-      'when compileIfNeeded runs with a leftover compile marker, '
-      'then it discards the cached dill and recompiles',
-      () async {
-        final watchDirs = {p.join(tempDir.path, 'bin')};
-
-        await compiler.start();
-        expect(await compiler.compileIfNeeded(watchDirs), isTrue);
-
-        // Simulate a previous session killed mid-compile.
-        File('${compiler.outputDill}.compiling').createSync();
-
-        expect(await compiler.compileIfNeeded(watchDirs), isTrue);
-        expect(File('${compiler.outputDill}.compiling').existsSync(), isFalse);
-        expect(File(compiler.outputDill).existsSync(), isTrue);
       },
       timeout: const Timeout(Duration(seconds: 60)),
     );
@@ -107,7 +73,7 @@ void main() {
       'then the dill, incremental dill, and marker are deleted',
       () async {
         await compiler.start();
-        await compiler.compile();
+        await compiler.ensureWarm();
         File('${compiler.outputDill}.incremental.dill').createSync();
         File('${compiler.outputDill}.compiling').createSync();
 
@@ -122,6 +88,39 @@ void main() {
 
         // Absent files do not throw.
         await compiler.invalidateCachedDill();
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+
+    test(
+      'when compile is called immediately after start, '
+      'then it waits for the background pre-warm instead of colliding with it',
+      () async {
+        await compiler.start();
+
+        final result = await compiler.compile();
+        await compiler.accept();
+
+        expect(result.errorCount, 0);
+        expect(File(compiler.outputDill).existsSync(), isTrue);
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+
+    test(
+      'when reset is called while the background pre-warm is still running, '
+      'then the next compile still produces a full kernel',
+      () async {
+        final mainFile = p.join(tempDir.path, 'bin', 'main.dart');
+
+        await compiler.start();
+        await compiler.reset();
+
+        final result = await compiler.compile(changedPaths: {mainFile});
+        await compiler.accept();
+
+        expect(result.errorCount, 0);
+        expect(result.dillOutput, compiler.outputDill);
       },
       timeout: const Timeout(Duration(seconds: 60)),
     );
@@ -176,9 +175,9 @@ void main() {
         await compiler.start();
 
         // Initial compile.
-        final initial = await compiler.compile();
-        expect(initial.errorCount, 0);
-        await compiler.accept();
+        final initial = await compiler.ensureWarm();
+        expect(initial, isNotNull);
+        expect(initial!.errorCount, 0);
 
         // Modify the file.
         await File(mainFile).writeAsString(
@@ -194,7 +193,7 @@ void main() {
     );
   });
 
-  group('Given a KernelCompiler with a file containing errors', () {
+  group('Given a KernelCompiler with a file containing errors,', () {
     late Directory tempDir;
     late KernelCompiler compiler;
 
@@ -233,9 +232,10 @@ void main() {
       'then it reports a non-zero error count and still clears the marker',
       () async {
         await compiler.start();
-        final result = await compiler.compile();
+        final result = await compiler.ensureWarm();
 
-        expect(result.errorCount, greaterThan(0));
+        expect(result, isNotNull);
+        expect(result!.errorCount, greaterThan(0));
         // The FES finished writing, so the dill state is consistent.
         expect(
           File('${compiler.outputDill}.compiling').existsSync(),
@@ -246,7 +246,7 @@ void main() {
     );
   });
 
-  group('Given a dependency added to package_config.json', () {
+  group('Given a dependency added to package_config.json,', () {
     late Directory tempDir;
     late KernelCompiler compiler;
     late String mainFile;
@@ -292,9 +292,7 @@ void main() {
       () async {
         await compiler.start();
 
-        // Baseline: main does not import the new package yet.
-        expect((await compiler.compile()).errorCount, 0);
-        await compiler.accept();
+        expect((await compiler.ensureWarm())?.errorCount, 0);
 
         // The app now imports the package, but package_config.json doesn't map
         // it yet. The resident compiler only knows the packages it read at

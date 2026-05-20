@@ -35,12 +35,6 @@ const startBlockedByErrorsManual =
     'Waiting for the project to build. Once the errors above are resolved, '
     'press "R" to rebuild and start the server.';
 
-/// Shown when a previous session died mid-compile, leaving the cached build
-/// suspect.
-const previousCompileInterrupted =
-    'A previous compilation was interrupted; discarding the cached build and '
-    'recompiling from scratch.';
-
 /// Shown when the server crashed booting from the cached kernel.
 const cachedBuildCrashedOnBoot =
     'The server failed to start from the cached build (it may be corrupt); '
