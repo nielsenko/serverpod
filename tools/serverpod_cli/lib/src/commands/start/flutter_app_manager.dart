@@ -9,6 +9,7 @@ import 'package:serverpod_cli/src/commands/start/flutter_dependency_tracker.dart
 import 'package:serverpod_cli/src/commands/start/flutter_log_event.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_process.dart';
 import 'package:serverpod_cli/src/commands/start/package_dependency_tracker.dart';
+import 'package:serverpod_cli/src/commands/start/flutter_runtime_info.dart';
 import 'package:serverpod_cli/src/config/flutter_app_config.dart';
 import 'package:serverpod_cli/src/util/pubspec_helpers.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
@@ -268,6 +269,28 @@ class FlutterAppManager {
     final device =
         runtime.app.device ?? ideDevice() ?? flutterDeviceWebServerWithBrowser;
 
+    // Reattach if the previous session left this app's Flutter process
+    // alive. Skips the expensive native build. Keyed per app id so apps
+    // never read or delete each other's reattach state.
+    final pkgDirAbs = p.absolute(p.joinAll(runtime.app.pathParts));
+    String? attachUri;
+    final prior = await readFlutterRuntimeInfo(serverpodToolDir, appId);
+    if (prior != null) {
+      final usable = await isFlutterRuntimeUsable(
+        prior,
+        currentFlutterPackageDir: pkgDirAbs,
+        currentDevice: device,
+      );
+      if (usable) {
+        log.info(
+          'Reattaching to surviving ${runtime.app.name} (pid ${prior.pid}).',
+        );
+        attachUri = prior.vmServiceUri;
+      } else {
+        await deleteFlutterRuntimeInfo(serverpodToolDir, appId);
+      }
+    }
+
     late final FlutterProcess process;
     process = FlutterProcess(
       flutterPackageDir: p.joinAll(runtime.app.pathParts),
@@ -276,6 +299,8 @@ class FlutterAppManager {
       flutterProxy: runtime.proxy,
       useDevFsReload: flutterDevfsReload,
       runtimeInfoDir: serverpodToolDir,
+      runtimeInfoAppId: appId,
+      attachToVmServiceUri: attachUri,
       flutterExecutable: flutterExecutableForTesting ?? 'flutter',
       machineArgsOverride: argsOverrideForTesting?.call(runtime.app),
       stdoutSink: stdoutSinkFor(runtime.app),
