@@ -570,6 +570,12 @@ class FlutterProcess {
         entryPoint: entry,
         outputDill: outputDill,
         packagesPath: packages,
+        // Mirror flutter_tools: its FES inherits CWD from `flutter run`
+        // which our spawn sets to the flutter package dir. Without this,
+        // FES runs from wherever the user invoked serverpod_cli and
+        // fails to read the package_config even when --packages is an
+        // absolute path.
+        workingDirectory: pkgDir,
       );
       await compiler.start();
       _compiler = compiler;

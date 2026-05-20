@@ -82,6 +82,7 @@ class FrontendServerClient {
     String target = 'vm',
     String? packagesJson,
     String? nativeAssetsPath,
+    String? workingDirectory,
     List<String> extraArgs = const [],
     IOSink? errorSink,
   }) async {
@@ -123,12 +124,17 @@ class FrontendServerClient {
       feServer = await Process.start(
         p.join(dartSdk, 'bin', 'dartaotruntime$exe'),
         [aotSnapshot, ...arguments],
+        workingDirectory: workingDirectory,
       );
     } else {
-      feServer = await Process.start(p.join(dartSdk, 'bin', 'dart$exe'), [
-        p.join(dartSdk, 'bin', 'snapshots', 'frontend_server.dart.snapshot'),
-        ...arguments,
-      ]);
+      feServer = await Process.start(
+        p.join(dartSdk, 'bin', 'dart$exe'),
+        [
+          p.join(dartSdk, 'bin', 'snapshots', 'frontend_server.dart.snapshot'),
+          ...arguments,
+        ],
+        workingDirectory: workingDirectory,
+      );
     }
 
     final feServerStdoutLines = StreamQueue(
