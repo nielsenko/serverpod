@@ -328,6 +328,42 @@ void main() {
     },
   );
 
+  group('Given a FlutterProcess constructed with DevFS reload enabled,', () {
+    FlutterProcess processOn(String device) => FlutterProcess(
+      flutterPackageDir: Directory.current.path,
+      device: device,
+      flutterExecutable: _dartExecutable(),
+      useDevFsReload: true,
+    );
+
+    test(
+      'when the device runs on the Dart VM, '
+      'then DevFS reload is supported',
+      () {
+        expect(processOn('macos').devFsReloadSupported, isTrue);
+      },
+    );
+
+    test(
+      'when the device compiles to JavaScript, '
+      'then DevFS reload is not supported since there is no kernel to push',
+      () {
+        for (final device in [
+          'web-server',
+          'web-server-launch-browser',
+          'chrome',
+          'edge',
+        ]) {
+          expect(
+            processOn(device).devFsReloadSupported,
+            isFalse,
+            reason: device,
+          );
+        }
+      },
+    );
+  });
+
   group('Given a FlutterProcess that was never started', () {
     late FlutterProcess fp;
 
