@@ -552,10 +552,10 @@ class FlutterProcess {
     final entry = p.normalize(
       p.absolute(_entryPoint ?? p.join(pkgDir, 'lib', 'main.dart')),
     );
+    // Dart workspaces keep package_config.json at the workspace root,
+    // not in each member package; walk up until we find it.
     final packages = p.normalize(
-      p.absolute(
-        _packagesPath ?? p.join(pkgDir, '.dart_tool', 'package_config.json'),
-      ),
+      p.absolute(_packagesPath ?? _findPackageConfig(pkgDir)),
     );
     final outputDill = p.normalize(
       p.absolute(p.join(pkgDir, '.dart_tool', 'serverpod', 'flutter.dill')),
@@ -1226,6 +1226,23 @@ class FlutterProcess {
     var path = uri.path;
     if (path.endsWith('/ws')) path = path.substring(0, path.length - 3);
     return uri.replace(scheme: scheme, path: path).toString();
+  }
+}
+
+/// Walk up from [startDir] (absolute) until `.dart_tool/package_config.json`
+/// is found; return its path. Falls back to the conventional location under
+/// [startDir] when no ancestor has it (FES then surfaces the missing file
+/// rather than us silently guessing).
+String _findPackageConfig(String startDir) {
+  var dir = startDir;
+  while (true) {
+    final candidate = p.join(dir, '.dart_tool', 'package_config.json');
+    if (File(candidate).existsSync()) return candidate;
+    final parent = p.dirname(dir);
+    if (parent == dir) {
+      return p.join(startDir, '.dart_tool', 'package_config.json');
+    }
+    dir = parent;
   }
 }
 
