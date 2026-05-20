@@ -111,6 +111,17 @@ enum StartOption<V> implements OptionDefinition<V> {
           'latency from seconds to ~200ms; non-web only for now.',
     ),
   ),
+  shutdownFlutterOnExit(
+    FlagOption(
+      argName: 'shutdown-flutter-on-exit',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Terminate the Flutter app when serverpod exits, instead of '
+          'leaving it running for the next `serverpod start` to reattach. '
+          'Useful for CI and one-shot scripts that expect clean teardown.',
+    ),
+  ),
   ;
 
   const StartOption(this.option);
@@ -156,6 +167,9 @@ class StartCommand extends ServerpodCommand<StartOption> {
     final flutterDevfsReload = commandConfig.value(
       StartOption.flutterDevfsReload,
     );
+    final shutdownFlutterOnExit = commandConfig.value(
+      StartOption.shutdownFlutterOnExit,
+    );
 
     // In TUI mode, start the UI immediately and do all setup in onReady.
     // This avoids a visible delay from config loading and Docker checks.
@@ -189,6 +203,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
         watch: watch,
         launchFlutterApp: launchFlutterApp,
         flutterDevfsReload: flutterDevfsReload,
+        shutdownFlutterOnExit: shutdownFlutterOnExit,
         serverArgs: argResults?.rest ?? [],
         config: config,
       );
@@ -270,7 +285,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
           if (ctx.session.isRunning) log.info(serverRunning);
           final exitCode = await shutdown.future;
           log.info('Server stopped (exitCode: $exitCode).');
-          await ctx.dispose();
+          await ctx.dispose(shutdownFlutterApp: shutdownFlutterOnExit);
           if (exitCode != 0) throw ExitException(exitCode);
       }
     } finally {
@@ -1240,6 +1255,7 @@ Future<int> _runWithTui({
   required bool watch,
   required bool launchFlutterApp,
   required bool flutterDevfsReload,
+  required bool shutdownFlutterOnExit,
   required List<String> serverArgs,
   required GeneratorConfig config,
 }) async {
@@ -1279,6 +1295,7 @@ Future<int> _runWithTui({
       watch: watch,
       launchFlutterApp: launchFlutterApp,
       flutterDevfsReload: flutterDevfsReload,
+      shutdownFlutterOnExit: shutdownFlutterOnExit,
       serverArgs: serverArgs,
       config: config,
       shutdown: shutdown,
@@ -1343,6 +1360,7 @@ Future<void> _runTuiBackend({
   required bool watch,
   required bool launchFlutterApp,
   required bool flutterDevfsReload,
+  required bool shutdownFlutterOnExit,
   required List<String> serverArgs,
   required GeneratorConfig config,
   required _ShutdownSignal shutdown,
@@ -1583,7 +1601,10 @@ Future<void> _runTuiBackend({
         holder.markDirty();
         log.info('Server stopped (exitCode: $exitCode).');
 
-        await ctx.dispose();
+        // TODO: replace with a TUI Q prompt that lets the user opt
+        // into shutdown interactively. For now the CLI flag is the
+        // only way; Q always leaves Flutter running.
+        await ctx.dispose(shutdownFlutterApp: shutdownFlutterOnExit);
     }
   } catch (e, st) {
     // Surface the crash in the TUI (left open so it stays visible alongside the
