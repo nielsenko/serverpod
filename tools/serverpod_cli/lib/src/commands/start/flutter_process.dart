@@ -675,19 +675,29 @@ class FlutterProcess {
         await compiler.reject();
         return false;
       }
-      await devFS.writeFiles({
-        Uri.parse(_dillUri): DevFSFileContent(File(result.dillOutput!)),
-      });
-      final reload = await vmService.reloadSources(
-        isolateId,
-        rootLibUri: '${devFS.baseUri}$_dillUri',
-      );
-      if (reload.success != true) {
-        log.warning(
-          'Flutter reload: reloadSources rejected: ${reload.json?['notices']}',
+
+      // No source changes -> dill on the VM is already current; skip
+      // the DevFS push (~MB upload) and reloadSources (~100-500ms
+      // VM-side rebind), just reassemble the widget tree. This is the
+      // 'IDE Hot Reload button after no edits' path.
+      if (changedPaths.isEmpty) {
+        log.debug('Flutter reload: reassemble-only (no source changes)');
+      } else {
+        await devFS.writeFiles({
+          Uri.parse(_dillUri): DevFSFileContent(File(result.dillOutput!)),
+        });
+        final reload = await vmService.reloadSources(
+          isolateId,
+          rootLibUri: '${devFS.baseUri}$_dillUri',
         );
-        await compiler.reject();
-        return false;
+        if (reload.success != true) {
+          log.warning(
+            'Flutter reload: reloadSources rejected: '
+            '${reload.json?['notices']}',
+          );
+          await compiler.reject();
+          return false;
+        }
       }
       await vmService.callServiceExtension(
         'ext.flutter.reassemble',
