@@ -6,12 +6,14 @@ import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_log_event.dart';
+import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
 import 'package:serverpod_cli/src/commands/start/server_process.dart'
     show vmServiceWsUri;
 import 'package:serverpod_cli/src/util/browser_launcher.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_cli/src/util/strip_ansi.dart';
 import 'package:serverpod_cli/src/vendored/flutter_daemon_protocol.dart';
+import 'package:serverpod_cli/src/vendored/flutter_devfs.dart';
 import 'package:serverpod_cli/src/vm_proxy/proxy.dart';
 import 'package:serverpod_shared/log.dart' show LogLevel;
 import 'package:serverpod_tui/serverpod_tui.dart' show BoundedQueueList;
@@ -108,6 +110,25 @@ class FlutterProcess {
   VmService? _vmService;
   bool _browserOpening = false;
 
+  String? _isolateId;
+
+  /// When non-null, reload uses our own FES + DevFS pipeline instead
+  /// of the daemon-stdin `app.restart` round-trip. Set by [start] when
+  /// [useDevFsReload] is on; nulled on failure to construct/bring up.
+  KernelCompiler? _compiler;
+
+  DevFS? _devFS;
+
+  static const _devFsName = 'serverpod_flutter';
+
+  static const _dillUri = 'main.dart.dill';
+
+  final bool useDevFsReload;
+
+  final String? _entryPoint;
+
+  final String? _packagesPath;
+
   // `null` result means the process exited before publishing a URI.
   final Completer<String?> _vmServiceUriCompleter = Completer<String?>();
   final Completer<int> _exitCodeCompleter = Completer<int>();
@@ -127,6 +148,9 @@ class FlutterProcess {
     IOSink? stdoutSink,
     IOSink? stderrSink,
     List<String>? machineArgsOverride,
+    this.useDevFsReload = false,
+    String? entryPoint,
+    String? packagesPath,
     @visibleForTesting List<String>? argsOverrideForTesting,
     @visibleForTesting Future<bool> Function(Uri url)? openBrowserForTesting,
   }) : _flutterPackageDir = flutterPackageDir,
@@ -141,6 +165,8 @@ class FlutterProcess {
        _stderr = stderrSink ?? stderr,
        _launchBrowser = device == flutterDeviceWebServerWithBrowser,
        _machineArgsOverride = machineArgsOverride,
+       _entryPoint = entryPoint,
+       _packagesPath = packagesPath,
        _argsOverrideForTesting = argsOverrideForTesting,
        _openBrowserForTesting = openBrowserForTesting;
 
@@ -186,6 +212,10 @@ class FlutterProcess {
         <String>['run', '--machine', '-d', device, ..._extraArgs];
 
     final invocation = await _resolveFlutterInvocation(_flutterExecutable);
+
+    if (useDevFsReload) {
+      await _startCompiler(invocation.flutterRoot);
+    }
 
     Process process;
     try {
@@ -312,6 +342,7 @@ class FlutterProcess {
         _vmService = vm;
         await _subscribeToVmStreams(vm);
         _startVmServiceHeartbeat(vm);
+        if (_compiler != null) await _bringUpDevFs(_vmService!);
         return;
       } on Exception {
         if (attempt == 4) {
@@ -495,10 +526,109 @@ class FlutterProcess {
   }
 
   /// Hot reload. Daemon-reported success; never throws.
-  Future<bool> reload() => _appRestart(fullRestart: false);
+  Future<bool> reload({Set<String> changedPaths = const {}}) {
+    if (_compiler != null && _devFS != null && _isolateId != null) {
+      return _devFsReload(changedPaths);
+    }
+    return _appRestart(fullRestart: false);
+  }
 
   /// Hot restart: full app reinit, state lost.
   Future<bool> restart() => _appRestart(fullRestart: true);
+
+  Future<void> _startCompiler(String? flutterRoot) async {
+    if (flutterRoot == null) {
+      log.warning(
+        'Flutter DevFS reload requested but flutterRoot is unknown; '
+        'falling back to daemon-stdin reload.',
+      );
+      return;
+    }
+    final entry = _entryPoint ?? p.join(_flutterPackageDir, 'lib', 'main.dart');
+    final packages =
+        _packagesPath ??
+        p.join(_flutterPackageDir, '.dart_tool', 'package_config.json');
+    final outputDill = p.join(
+      _flutterPackageDir,
+      '.dart_tool',
+      'serverpod',
+      'flutter.dill',
+    );
+    final compiler = KernelCompiler.flutter(
+      flutterRoot: flutterRoot,
+      entryPoint: entry,
+      outputDill: outputDill,
+      packagesPath: packages,
+    );
+    await compiler.start();
+    _compiler = compiler;
+  }
+
+  Future<void> _bringUpDevFs(VmService vmService) async {
+    try {
+      final vm = await vmService.getVM();
+      final isolates = vm.isolates ?? const [];
+      if (isolates.isEmpty) {
+        log.warning('Flutter VM reports no isolates; DevFS reload disabled.');
+        return;
+      }
+      _isolateId = isolates.first.id;
+
+      final devFS = DevFS(
+        vmService: vmService,
+        fsName: _devFsName,
+        httpAddress: Uri.parse(_vmServiceUri!),
+      );
+      await devFS.create();
+      _devFS = devFS;
+    } on RPCError catch (e) {
+      log.warning('Flutter DevFS bring-up failed: $e');
+    }
+  }
+
+  Future<bool> _devFsReload(Set<String> changedPaths) async {
+    final compiler = _compiler!;
+    final devFS = _devFS!;
+    final isolateId = _isolateId!;
+    final vmService = _vmService!;
+    try {
+      final result = await compiler.compile(changedPaths: changedPaths);
+      if (result.errorCount > 0) {
+        log.warning(
+          'Flutter reload: compile failed:\n'
+          '${result.compilerOutputLines.join('\n')}',
+        );
+        await compiler.reject();
+        return false;
+      }
+      await devFS.writeFiles({
+        Uri.parse(_dillUri): DevFSFileContent(File(result.dillOutput!)),
+      });
+      final reload = await vmService.reloadSources(
+        isolateId,
+        rootLibUri: '${devFS.baseUri}$_dillUri',
+      );
+      if (reload.success != true) {
+        log.warning(
+          'Flutter reload: reloadSources rejected: ${reload.json?['notices']}',
+        );
+        await compiler.reject();
+        return false;
+      }
+      await vmService.callServiceExtension(
+        'ext.flutter.reassemble',
+        isolateId: isolateId,
+      );
+      compiler.accept();
+      return true;
+    } catch (e) {
+      log.warning('Flutter DevFS reload failed: $e');
+      try {
+        await compiler.reject();
+      } catch (_) {}
+      return false;
+    }
+  }
 
   Future<bool> _appRestart({required bool fullRestart}) async {
     final op = fullRestart ? 'restart' : 'reload';
@@ -957,6 +1087,14 @@ class FlutterProcess {
       _vmStderrDecoder = null;
       _vmServiceHeartbeat = null;
 
+      try {
+        await _devFS?.destroy();
+      } catch (_) {}
+      _devFS = null;
+      await _compiler?.dispose();
+      _compiler = null;
+      _isolateId = null;
+
       await _vmService?.dispose();
       _vmService = null;
       _vmServiceUri = null;
@@ -968,20 +1106,25 @@ class FlutterProcess {
     }
   }
 
-  static ({String executable, List<String> baseArgs})? _cachedInvocation;
+  static _FlutterInvocation? _cachedInvocation;
 
   /// Probe `flutter --version --machine` for `flutterRoot`, then return
   /// `dart <flutterRoot>/.../flutter_tools.dart` so signals bypass
   /// puro/fvm/asdf wrappers and reach the daemon. Falls back to
   /// invoking [flutterExecutable] verbatim if the SDK paths are missing.
-  static Future<({String executable, List<String> baseArgs})>
-  _resolveFlutterInvocation(String flutterExecutable) async {
+  static Future<_FlutterInvocation> _resolveFlutterInvocation(
+    String flutterExecutable,
+  ) async {
     final cached = _cachedInvocation;
     if (cached != null) return cached;
 
     // Don't cache the fallback: a fake-executable test probe would
     // poison the cache for later real callers.
-    final fallback = (executable: flutterExecutable, baseArgs: <String>[]);
+    final fallback = _FlutterInvocation(
+      executable: flutterExecutable,
+      baseArgs: const [],
+      flutterRoot: null,
+    );
     try {
       final result = await Process.run(
         flutterExecutable,
@@ -1021,9 +1164,10 @@ class FlutterProcess {
           !File(entry).existsSync()) {
         return fallback;
       }
-      return _cachedInvocation = (
+      return _cachedInvocation = _FlutterInvocation(
         executable: dartBin,
         baseArgs: ['--disable-dart-dev', '--packages=$packages', entry],
+        flutterRoot: root,
       );
     } catch (_) {
       return fallback;
@@ -1144,4 +1288,15 @@ class _CallbackSink<T> implements Sink<T> {
 
   @override
   void close() {}
+}
+
+class _FlutterInvocation {
+  const _FlutterInvocation({
+    required this.executable,
+    required this.baseArgs,
+    required this.flutterRoot,
+  });
+  final String executable;
+  final List<String> baseArgs;
+  final String? flutterRoot;
 }
