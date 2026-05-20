@@ -226,12 +226,14 @@ class RunnerConfig {
   const RunnerConfig({
     required this.watch,
     required this.flutter,
+    this.flutterDevfsReload = false,
     required this.serverArgs,
     this.docker,
   });
 
   final bool watch;
   final bool flutter;
+  final bool flutterDevfsReload;
   final List<String> serverArgs;
 
   /// Whether Docker Compose services are part of this stack.
@@ -252,6 +254,8 @@ class RunnerConfig {
     if (watch != other.watch) '--watch',
     if (flutter != other.flutter) '--flutter',
     if (other.docker != null && docker != other.docker) '--docker',
+    if (flutterDevfsReload != other.flutterDevfsReload)
+      '--flutter-devfs-reload',
     if (!_serverArgsEqual.equals(serverArgs, other.serverArgs))
       'server arguments after --',
   ];
@@ -260,6 +264,7 @@ class RunnerConfig {
     'watch': watch,
     'flutter': flutter,
     if (docker != null) 'docker': docker,
+    'flutterDevfsReload': flutterDevfsReload,
     'serverArgs': serverArgs,
   };
 
@@ -267,6 +272,7 @@ class RunnerConfig {
     watch: json['watch'] as bool? ?? true,
     flutter: json['flutter'] as bool? ?? true,
     docker: json['docker'] as bool?,
+    flutterDevfsReload: json['flutterDevfsReload'] as bool? ?? false,
     serverArgs: switch (json['serverArgs']) {
       final List<Object?> args => [for (final arg in args) '$arg'],
       _ => const [],

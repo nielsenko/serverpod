@@ -411,7 +411,11 @@ class WatchSession {
       if (changedPaths.isEmpty && change == PackageDependencyChange.none) {
         return;
       }
-      await _reloadOrRestartFlutterApp(change, appId: appId);
+      await _reloadOrRestartFlutterApp(
+        change,
+        appId: appId,
+        changedPaths: changedPaths.toSet(),
+      );
     }).wait;
   }
 
@@ -423,6 +427,7 @@ class WatchSession {
   Future<void> _reloadOrRestartFlutterApp(
     PackageDependencyChange change, {
     required String appId,
+    Set<String> changedPaths = const {},
   }) async {
     switch (change) {
       case PackageDependencyChange.assets:
@@ -435,7 +440,7 @@ class WatchSession {
         log.info(flutterDependenciesChangedDart);
         await _restartFlutter(appId);
       case PackageDependencyChange.none:
-        await _reloadFlutter(appId);
+        await _reloadFlutter(appId, changedPaths: changedPaths);
     }
   }
 
@@ -861,14 +866,17 @@ class WatchSession {
   }
 
   /// Reloads a Flutter app and logs the outcome. Never throws.
-  Future<void> _reloadFlutter(String appId) async {
+  Future<void> _reloadFlutter(
+    String appId, {
+    Set<String> changedPaths = const {},
+  }) async {
     final flutter = _flutterManager?.processFor(appId);
     if (flutter == null) return;
     if (!flutter.isVmServiceConnected) {
       log.debug('Flutter app $appId not ready; skipping reload.');
       return;
     }
-    final ok = await flutter.reload();
+    final ok = await flutter.reload(changedPaths: changedPaths);
     if (ok) {
       log.info(flutterAppReloaded);
     } else {

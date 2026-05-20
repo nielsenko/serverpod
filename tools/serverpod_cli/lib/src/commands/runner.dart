@@ -49,6 +49,16 @@ enum RunnerOption<V> implements OptionDefinition<V> {
       helpText: 'Auto-launch companion Flutter apps on the first UI attach.',
     ),
   ),
+  flutterDevfsReload(
+    FlagOption(
+      argName: 'flutter-devfs-reload',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Experimental: drive Flutter hot reload through our own FES + DevFS '
+          'push instead of the daemon-stdin app.restart.',
+    ),
+  ),
   detached(
     FlagOption(
       argName: 'detached',
@@ -150,6 +160,9 @@ class RunnerCommand extends ServerpodCommand<RunnerOption> {
         // for.
         keepOpenOnFailure: commandConfig.value(RunnerOption.watch),
         launchFlutterApp: commandConfig.value(RunnerOption.flutter),
+        flutterDevfsReload: commandConfig.value(
+          RunnerOption.flutterDevfsReload,
+        ),
         shutdown: shutdown,
         logHistory: logHistory,
         // Recorded as the pod's raw output before being echoed on: it is what

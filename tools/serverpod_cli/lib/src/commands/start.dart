@@ -113,6 +113,17 @@ enum StartOption<V> implements OptionDefinition<V> {
           'auto-launch. Apps can still be started on demand from the TUI.',
     ),
   ),
+  flutterDevfsReload(
+    FlagOption(
+      argName: 'flutter-devfs-reload',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Experimental: drive Flutter hot reload through our own FES + '
+          'DevFS push instead of the daemon-stdin app.restart. Cuts reload '
+          'latency from seconds to ~200ms; non-web only for now.',
+    ),
+  ),
   ;
 
   const StartOption(this.option);
@@ -157,6 +168,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
     final asked = RunnerConfig(
       watch: commandConfig.value(StartOption.watch),
       flutter: commandConfig.value(StartOption.flutter),
+      flutterDevfsReload: commandConfig.value(StartOption.flutterDevfsReload),
       serverArgs: argResults?.rest ?? const [],
     );
 
@@ -310,6 +322,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
         serverDir,
         if (asked.watch) '--watch' else '--no-watch',
         if (asked.flutter) '--flutter' else '--no-flutter',
+        if (asked.flutterDevfsReload) '--flutter-devfs-reload',
         if (docker == true) '--docker',
         if (docker == false) '--no-docker',
         if (asked.serverArgs.isNotEmpty) ...['--', ...asked.serverArgs],
@@ -660,6 +673,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   // `false`, there is no way to recover (non-TUI `--no-watch`), so fail fast.
   required bool keepOpenOnFailure,
   required bool launchFlutterApp,
+  required bool flutterDevfsReload,
   required ShutdownSignal shutdown,
   // Session-wide log retention. Filled here rather than by the presentation
   // layer, so the MCP log tools serve the same content with and without the
@@ -973,6 +987,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     serverpodToolDir: serverpodToolDir,
     serverPubspecFile: serverPubspecFile,
     serverPackageDirectoryPathParts: config.serverPackageDirectoryPathParts,
+    flutterDevfsReload: flutterDevfsReload,
     onReady: (app, url) =>
         runnerEvents?.recordFlutterAppState(app.id, running: true, url: url),
     onStart: (app, process) => _recordExtensionEvents(
@@ -1205,6 +1220,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         watch: watch,
         flutter: launchFlutterApp,
         docker: startDocker,
+        flutterDevfsReload: flutterDevfsReload,
         serverArgs: requestedServerArgs,
       ),
     ),
