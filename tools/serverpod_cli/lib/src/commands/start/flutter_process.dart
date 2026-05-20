@@ -548,13 +548,17 @@ class FlutterProcess {
       );
       return;
     }
-    final pkgDir = p.absolute(_flutterPackageDir);
-    final entry = p.absolute(_entryPoint ?? p.join(pkgDir, 'lib', 'main.dart'));
-    final packages = p.absolute(
-      _packagesPath ?? p.join(pkgDir, '.dart_tool', 'package_config.json'),
+    final pkgDir = p.normalize(p.absolute(_flutterPackageDir));
+    final entry = p.normalize(
+      p.absolute(_entryPoint ?? p.join(pkgDir, 'lib', 'main.dart')),
     );
-    final outputDill = p.absolute(
-      p.join(pkgDir, '.dart_tool', 'serverpod', 'flutter.dill'),
+    final packages = p.normalize(
+      p.absolute(
+        _packagesPath ?? p.join(pkgDir, '.dart_tool', 'package_config.json'),
+      ),
+    );
+    final outputDill = p.normalize(
+      p.absolute(p.join(pkgDir, '.dart_tool', 'serverpod', 'flutter.dill')),
     );
     log.debug(
       'Flutter FES: starting (target=flutter, sdk=$flutterRoot, '
