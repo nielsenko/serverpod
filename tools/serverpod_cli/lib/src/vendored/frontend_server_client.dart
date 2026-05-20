@@ -77,10 +77,12 @@ class FrontendServerClient {
     String entrypoint,
     String outputDillPath,
     String platformKernel, {
-    required String sdkRoot,
+    required String dartSdk,
+    String? sdkRoot,
     String target = 'vm',
     String? packagesJson,
     String? nativeAssetsPath,
+    List<String> extraArgs = const [],
     IOSink? errorSink,
   }) async {
     final entrypointUri = Uri.file(p.absolute(entrypoint));
@@ -89,7 +91,7 @@ class FrontendServerClient {
         : Uri.file(p.absolute(packagesJson));
     final arguments = <String>[
       '--sdk-root',
-      sdkRoot,
+      sdkRoot ?? dartSdk,
       '--platform=${Uri.file(platformKernel)}',
       '--target=$target',
       '--output-dill',
@@ -100,25 +102,25 @@ class FrontendServerClient {
         p.absolute(nativeAssetsPath),
       ],
       '--incremental',
+      ...extraArgs,
     ];
     final exe = Platform.isWindows ? '.exe' : '';
     final Process feServer;
 
-    // Locate frontend server from SDK root.
     final aotSnapshot = p.join(
-      sdkRoot,
+      dartSdk,
       'bin',
       'snapshots',
       'frontend_server_aot.dart.snapshot',
     );
     if (File(aotSnapshot).existsSync()) {
       feServer = await Process.start(
-        p.join(sdkRoot, 'bin', 'dartaotruntime$exe'),
+        p.join(dartSdk, 'bin', 'dartaotruntime$exe'),
         [aotSnapshot, ...arguments],
       );
     } else {
-      feServer = await Process.start(p.join(sdkRoot, 'bin', 'dart$exe'), [
-        p.join(sdkRoot, 'bin', 'snapshots', 'frontend_server.dart.snapshot'),
+      feServer = await Process.start(p.join(dartSdk, 'bin', 'dart$exe'), [
+        p.join(dartSdk, 'bin', 'snapshots', 'frontend_server.dart.snapshot'),
         ...arguments,
       ]);
     }
