@@ -162,10 +162,8 @@ class WatchLoopContext {
         'Flutter app left running:\n'
         '  App:     ${app.name}\n'
         '  Device:  ${info.device}\n'
-        '  PID:     ${info.pid}\n'
         '  Attach:  ${info.vmServiceUri}\n'
-        '  Reattach by re-running serverpod start, or kill with: '
-        'kill ${info.pid}',
+        '  Reattach by re-running serverpod start.',
       );
     }
   }

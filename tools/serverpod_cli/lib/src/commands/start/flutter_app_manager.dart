@@ -325,7 +325,8 @@ class FlutterAppManager {
       );
       if (usable) {
         log.info(
-          'Reattaching to surviving ${runtime.app.name} (pid ${prior.pid}).',
+          'Reattaching to surviving ${runtime.app.name} '
+          'at ${prior.vmServiceUri}.',
         );
         attachUri = prior.vmServiceUri;
       } else {
