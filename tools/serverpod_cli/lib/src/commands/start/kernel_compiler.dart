@@ -109,15 +109,20 @@ class KernelCompiler {
   /// behind if the session dies mid-compile.
   String get _compileMarkerPath => '$outputDill.compiling';
 
-  /// Start the Frontend Server process.
-  ///
-  /// This starts the server in resident mode, ready to receive compile
-  /// commands. Call [compile] to perform the initial compilation.
+  /// Start the Frontend Server process and kick off an initial compile
+  /// in the background.
   ///
   /// When [outputDill] from a previous session exists, FES is started
-  /// with `--initialize-from-dill` pointing at it. The next [compile]
-  /// then produces an incremental delta rather than a full kernel,
-  /// shaving seconds off the first-reload latency.
+  /// with `--initialize-from-dill` pointing at it - subsequent compiles
+  /// then produce incremental deltas rather than a full kernel.
+  ///
+  /// The initial compile (pre-warm) runs in the background. Callers
+  /// that need a fresh dill on disk before consumer code observes it
+  /// (e.g. before booting the server from [outputDill]) should
+  /// `await ensureWarm()`. Callers that just need the FES to be ready
+  /// for subsequent incremental compiles (e.g. the Flutter side, where
+  /// the native build runs in parallel) can ignore [ensureWarm] and
+  /// let the first reload await it implicitly.
   Future<void> start() async {
     if (_started) return;
 
@@ -143,6 +148,7 @@ class KernelCompiler {
     );
     _started = true;
     _needsFullCompile = true;
+    _prewarmFuture = _runPrewarm();
   }
 
   /// Returns `true` if [outputDill] exists, is newer than every file under
@@ -320,38 +326,31 @@ class KernelCompiler {
     }
   }
 
-  /// The Dart kernel binary header is 8 bytes: 4-byte magic number followed by
-  /// a 4-byte binary format version. Two .dill files are compatible only if
-  /// these bytes match.
-  static const _dillHeaderSize = 8;
+  Future<CompileResult?>? _prewarmFuture;
 
-  /// Returns `true` if both files exist and their first [_dillHeaderSize] bytes
-  /// are identical.
-  static bool _dillHeadersMatch(String pathA, String pathB) {
+  Future<CompileResult?> _runPrewarm() async {
     try {
-      final fileA = File(pathA);
-      final fileB = File(pathB);
-      final headerA = fileA.openSync()..setPositionSync(0);
-      final headerB = fileB.openSync()..setPositionSync(0);
-      try {
-        final bytesA = headerA.readSync(_dillHeaderSize);
-        final bytesB = headerB.readSync(_dillHeaderSize);
-        if (bytesA.length != _dillHeaderSize ||
-            bytesB.length != _dillHeaderSize) {
-          return false;
-        }
-        for (var i = 0; i < _dillHeaderSize; i++) {
-          if (bytesA[i] != bytesB[i]) return false;
-        }
-        return true;
-      } finally {
-        headerA.closeSync();
-        headerB.closeSync();
+      final result = await compile();
+      if (result.errorCount > 0) {
+        await reject();
+      } else {
+        await accept();
       }
-    } on FileSystemException {
-      return false;
+      return result;
+    } catch (e) {
+      log.debug('FES pre-warm failed: $e (first compile will retry)');
+      return null;
     }
   }
+
+  /// Awaits the background pre-warm compile. Returns its
+  /// [CompileResult], or `null` if pre-warm failed unexpectedly.
+  ///
+  /// Server boot path awaits this before `dart run <outputDill>` so
+  /// the boot dill reflects current sources. Flutter side awaits it
+  /// inside `_devFsReload` to avoid colliding with FES, which is
+  /// serial.
+  Future<CompileResult?> ensureWarm() => _prewarmFuture ?? Future.value(null);
 }
 
 /// Runs a compilation step with progress feedback.

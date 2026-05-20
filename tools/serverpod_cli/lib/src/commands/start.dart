@@ -675,6 +675,13 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       return const WatchLoopAborted(1);
     }
 
+    // Start FES + kick off the pre-warm compile in the background, then
+    // wait for it before booting the server (the boot needs a fresh
+    // `outputDill` to `dart run`). FES validates the cached dill against
+    // current sources on its own - if `--initialize-from-dill` is stale
+    // or wrong-format, FES falls back to a full compile transparently;
+    // if it's fresh, the pre-warm is a near-no-op. Either way no
+    // upfront mtime/header check needed.
     await localCompiler.start();
 
     // Compile if the cached dill is stale. The FES starts in the background
@@ -686,12 +693,16 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     // fresh post-start state, ready for the watch session to compile from
     // scratch once the project is fixed.
     if (buildOk) {
-      if (!await localCompiler.compileIfNeeded(
-        config.watchPaths(includeWeb: true, includeClientPackage: true),
-      )) {
-        // Reject the failed compile so the FES returns to its last accepted
-        // (empty) state, leaving it ready for a clean full compile on recovery.
-        await localCompiler.reject();
+      CompileResult? warmResult;
+      final compileOk = await log.progress('Compiling server', () async {
+        warmResult = await localCompiler.ensureWarm();
+        return warmResult != null && warmResult!.errorCount == 0;
+      });
+      if (!compileOk) {
+        for (final line
+            in warmResult?.compilerOutputLines ?? const <String>[]) {
+          log.error(line);
+        }
         log.error('Initial compilation failed.');
         buildOk = false;
         if (!keepOpenOnFailure) {

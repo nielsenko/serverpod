@@ -116,7 +116,6 @@ class FlutterProcess {
   /// of the daemon-stdin `app.restart` round-trip. Set by [start] when
   /// [useDevFsReload] is on; nulled on failure to construct/bring up.
   KernelCompiler? _compiler;
-  Future<void>? _prewarmFuture;
   DevFS? _devFS;
 
   static const _devFsName = 'serverpod_flutter';
@@ -577,43 +576,18 @@ class FlutterProcess {
         // absolute path.
         workingDirectory: pkgDir,
       );
+      // `compiler.start()` brings up FES and kicks off the pre-warm
+      // compile in the background. The native build runs in parallel,
+      // so the pre-warm cost is hidden. `_devFsReload` awaits
+      // `compiler.ensureWarm()` before issuing its own compile.
       await compiler.start();
       _compiler = compiler;
       log.debug('Flutter FES: ready');
-      // Pre-warm: trigger a compile in the background so the first
-      // user edit hits the incremental path (~200ms) rather than the
-      // cold initial compile (~5s). Runs in parallel with the native
-      // build / Flutter launch, so it costs no perceived latency.
-      // `_devFsReload` awaits this future so a fast edit doesn't
-      // collide with an in-flight pre-warm.
-      _prewarmFuture = _prewarmCompiler(compiler);
     } catch (e) {
       log.warning(
         'Flutter FES failed to start: $e. Falling back to daemon-stdin '
         'reload.',
       );
-    }
-  }
-
-  Future<void> _prewarmCompiler(KernelCompiler compiler) async {
-    try {
-      log.debug('Flutter FES: pre-warming compile');
-      final result = await compiler.compile();
-      if (result.errorCount > 0) {
-        // Errors in user code show up on the first real reload, no
-        // need to surface them here. Reject so the next compile is
-        // treated as fresh against the user's then-current sources.
-        log.debug(
-          'Flutter FES pre-warm: ${result.errorCount} errors '
-          '(ignored, first reload will report them)',
-        );
-        await compiler.reject();
-      } else {
-        compiler.accept();
-        log.debug('Flutter FES: pre-warmed');
-      }
-    } catch (e) {
-      log.debug('Flutter FES pre-warm failed: $e (first reload will compile)');
     }
   }
 
@@ -657,14 +631,14 @@ class FlutterProcess {
   }
 
   Future<bool> _devFsReload(Set<String> changedPaths) async {
-    // Block until any in-flight pre-warm compile is done; FES is
-    // serial, so a user edit arriving mid-prewarm would otherwise
-    // throw StateError from FrontendServerClient.
-    await _prewarmFuture;
     final compiler = _compiler!;
     final devFS = _devFS!;
     final isolateId = _isolateId!;
     final vmService = _vmService!;
+    // Block until any in-flight pre-warm compile is done; FES is
+    // serial, so a user edit arriving mid-prewarm would otherwise
+    // throw StateError from FrontendServerClient.
+    await compiler.ensureWarm();
     try {
       final result = await compiler.compile(changedPaths: changedPaths);
       if (result.errorCount > 0) {

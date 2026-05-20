@@ -159,12 +159,12 @@ void main() {
       await _createMinimalDartProject(tempDir.path);
       final mainFile = p.join(tempDir.path, 'bin', 'main.dart');
       await File(mainFile).writeAsString('''
-import 'dart:io';
-void main() {
-  ProcessSignal.sigint.watch().listen((_) => exit(0));
-  Future.delayed(Duration(hours: 1));
-}
-''');
+    import 'dart:io';
+    void main() {
+      ProcessSignal.sigint.watch().listen((_) => exit(0));
+      Future.delayed(Duration(hours: 1));
+    }
+    ''');
 
       // Compile the initial kernel using KernelCompiler.
       dillPath = p.join(tempDir.path, '.dart_tool', 'serverpod', 'server.dill');
@@ -180,13 +180,13 @@ void main() {
         packagesPath: p.join(tempDir.path, '.dart_tool', 'package_config.json'),
       );
       await compiler.start();
-      final result = await compiler.compile();
-      if (result.errorCount > 0) {
+      final result = await compiler.ensureWarm();
+      if (result == null || result.errorCount > 0) {
         throw StateError(
-          'Failed to compile kernel: ${result.compilerOutputLines.join('\n')}',
+          'Failed to compile kernel: '
+          '${result?.compilerOutputLines.join('\n') ?? '(pre-warm crashed)'}',
         );
       }
-      await compiler.accept();
       await compiler.dispose();
 
       serverProcess = ServerProcess(
@@ -257,12 +257,12 @@ void main() {
         await _createMinimalDartProject(tempDir.path);
         final mainFile = p.join(tempDir.path, 'bin', 'main.dart');
         await File(mainFile).writeAsString('''
-import 'dart:io';
-void main() {
-  ProcessSignal.sigint.watch().listen((_) => exit(0));
-  Future.delayed(Duration(hours: 1));
-}
-''');
+      import 'dart:io';
+      void main() {
+        ProcessSignal.sigint.watch().listen((_) => exit(0));
+        Future.delayed(Duration(hours: 1));
+      }
+      ''');
 
         dillPath = p.join(
           tempDir.path,
@@ -286,13 +286,13 @@ void main() {
           ),
         );
         await compiler.start();
-        final result = await compiler.compile();
-        if (result.errorCount > 0) {
+        final result = await compiler.ensureWarm();
+        if (result == null || result.errorCount > 0) {
           throw StateError(
-            'Failed to compile kernel: ${result.compilerOutputLines.join('\n')}',
+            'Failed to compile kernel: '
+            '${result?.compilerOutputLines.join('\n') ?? '(pre-warm crashed)'}',
           );
         }
-        await compiler.accept();
         await compiler.dispose();
 
         expect(dillPath.contains(' '), isTrue);

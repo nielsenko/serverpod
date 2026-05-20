@@ -57,9 +57,10 @@ void main() {
         );
 
         await compiler.start();
-        final result = await compiler.compile();
+        final result = await compiler.ensureWarm();
 
-        expect(result.errorCount, 0);
+        expect(result, isNotNull);
+        expect(result!.errorCount, 0);
         expect(result.dillOutput, isNotEmpty);
         expect(File(outputDill).existsSync(), isTrue);
         expect(File('$outputDill.compiling').existsSync(), isFalse);
@@ -135,9 +136,9 @@ void main() {
         await compiler.start();
 
         // Initial compile.
-        final initial = await compiler.compile();
-        expect(initial.errorCount, 0);
-        await compiler.accept();
+        final initial = await compiler.ensureWarm();
+        expect(initial, isNotNull);
+        expect(initial!.errorCount, 0);
 
         // Modify the file.
         await File(mainFile).writeAsString(
@@ -192,9 +193,10 @@ void main() {
       'then it reports a non-zero error count and still clears the marker',
       () async {
         await compiler.start();
-        final result = await compiler.compile();
+        final result = await compiler.ensureWarm();
 
-        expect(result.errorCount, greaterThan(0));
+        expect(result, isNotNull);
+        expect(result!.errorCount, greaterThan(0));
         // The FES finished writing, so the dill state is consistent.
         expect(
           File('${compiler.outputDill}.compiling').existsSync(),
@@ -251,9 +253,10 @@ void main() {
       () async {
         await compiler.start();
 
-        // Baseline: main does not import the new package yet.
-        expect((await compiler.compile()).errorCount, 0);
-        await compiler.accept();
+        // Baseline: main does not import the new package yet. The background
+        // pre-warm compile covers this; await it before issuing manual
+        // compiles so they don't race the in-flight pre-warm (FES is serial).
+        expect((await compiler.ensureWarm())?.errorCount, 0);
 
         // The app now imports the package, but package_config.json doesn't map
         // it yet. The resident compiler only knows the packages it read at
