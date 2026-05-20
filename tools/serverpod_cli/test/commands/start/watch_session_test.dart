@@ -172,7 +172,7 @@ class _FakeFlutter extends Fake implements FlutterProcess {
   set isVmServiceConnected(bool value) => _vmServiceConnected = value;
 
   @override
-  Future<bool> reload() async {
+  Future<bool> reload({Set<String> changedPaths = const {}}) async {
     calls.add('reload');
     return true;
   }
