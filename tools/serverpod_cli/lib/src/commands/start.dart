@@ -1381,6 +1381,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       vmServiceInfoFile: vmServiceInfoFile,
       manifestPublisher: manifestPublisher,
       lock: lock,
+      serverpodToolDir: serverpodToolDir,
     ),
   );
 }

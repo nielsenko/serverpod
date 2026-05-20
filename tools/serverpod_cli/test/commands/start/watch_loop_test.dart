@@ -229,6 +229,7 @@ void main() {
               }
             : null,
         vmServiceInfoFile: vmServiceInfoFile,
+        serverpodToolDir: tempDir.path,
       );
     }
 
@@ -290,6 +291,7 @@ void main() {
           flutterManager: flutterManager,
           mcpSocket: mcp,
           attachSocket: null,
+          serverpodToolDir: tempDir.path,
           stopFileWatcher: () => stopFileWatcherCalls++,
           closeAnalyzers: () async {
             closeAnalyzersCalls++;
@@ -352,6 +354,7 @@ void main() {
           },
           stopDocker: null,
           vmServiceInfoFile: vmServiceInfoFile,
+          serverpodToolDir: tempDir.path,
         );
 
         await ctx.dispose();

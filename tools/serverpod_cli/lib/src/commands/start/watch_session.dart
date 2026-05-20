@@ -857,14 +857,18 @@ class WatchSession {
   }
 
   /// Stops server + Flutter, disposes compiler. Completes [done].
-  Future<void> dispose() async {
+  ///
+  /// [shutdownFlutterApp] passes through to `FlutterProcess.stop` -
+  /// when `false` (default) the Flutter app is left running and the
+  /// runtime-info file survives for the next session to reattach.
+  Future<void> dispose({bool shutdownFlutterApp = false}) async {
     _state = SessionState.disposed;
     await _vmServiceUriChangesController.close();
     // `_server` is null when disposing a degraded session that never booted.
     final code = await _server?.stop() ?? 0;
     // Stop Flutter after the server: an in-flight Flutter reload
     // mustn't see a half-shut-down server VM service.
-    await _flutterManager?.stopAll();
+    await _flutterManager?.stopAll(shutdownApp: shutdownFlutterApp);
     await _compiler?.dispose();
     if (!_done.isCompleted) _done.complete(code);
   }

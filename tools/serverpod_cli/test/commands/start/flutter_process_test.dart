@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_log_event.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_process.dart';
+import 'package:serverpod_cli/src/commands/start/flutter_runtime_info.dart';
 import 'package:serverpod_cli/src/vm_proxy/proxy.dart';
 import 'package:serverpod_shared/log.dart' show LogLevel;
 import 'package:test/test.dart';
@@ -327,6 +328,65 @@ void main() {
       );
     },
   );
+
+  group('Given a running FlutterProcess with a reattach breadcrumb,', () {
+    late Directory toolDir;
+
+    Future<FlutterProcess> startOn(String device) async {
+      final fp = FlutterProcess(
+        flutterPackageDir: Directory.current.path,
+        device: device,
+        flutterExecutable: _dartExecutable(),
+        argsOverrideForTesting: [_shimPath('never_publishes_uri.dart')],
+        runtimeInfoDir: toolDir.path,
+        runtimeInfoAppId: 'app',
+      );
+      await fp.start();
+      return fp;
+    }
+
+    setUp(() async {
+      toolDir = await Directory.systemTemp.createTemp('flutter_runtime_info_');
+      await File(flutterRuntimeInfoPath(toolDir.path, 'app')).writeAsString(
+        '{"vmServiceUri":"http://127.0.0.1:1/","device":"d",'
+        '"flutterPackageDir":"/tmp","createdAt":"2026-01-01T00:00:00.000Z"}',
+      );
+    });
+
+    tearDown(() async {
+      await toolDir.delete(recursive: true);
+    });
+
+    test(
+      'when stopped on a native device without an explicit shutdown, '
+      'then the breadcrumb is kept so the next session can reattach',
+      () async {
+        final fp = await startOn('macos');
+
+        await fp.stop(timeout: const Duration(seconds: 2));
+
+        expect(
+          File(flutterRuntimeInfoPath(toolDir.path, 'app')).existsSync(),
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      'when stopped on a web device without an explicit shutdown, '
+      'then the breadcrumb is removed because the app cannot survive',
+      () async {
+        final fp = await startOn('web-server');
+
+        await fp.stop(timeout: const Duration(seconds: 2));
+
+        expect(
+          File(flutterRuntimeInfoPath(toolDir.path, 'app')).existsSync(),
+          isFalse,
+        );
+      },
+    );
+  });
 
   group('Given a FlutterProcess constructed with DevFS reload enabled,', () {
     FlutterProcess processOn(String device) => FlutterProcess(

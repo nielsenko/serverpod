@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:serverpod_cli/src/commands/start/flutter_app_manager.dart';
+import 'package:serverpod_cli/src/commands/start/flutter_runtime_info.dart';
 import 'package:serverpod_cli/src/commands/start/mcp_socket.dart';
 import 'package:serverpod_cli/src/commands/start/watch_session.dart';
 import 'package:serverpod_cli/src/runner/runner_api.dart';
@@ -78,6 +79,7 @@ class WatchLoopContext {
   /// the package while this one is still tearing down.
   final RunnerLock? lock;
 
+  final String serverpodToolDir;
   bool _disposed = false;
 
   WatchLoopContext({
@@ -94,12 +96,21 @@ class WatchLoopContext {
     required this.vmServiceInfoFile,
     this.manifestPublisher,
     this.lock,
+    required this.serverpodToolDir,
   });
 
   /// Whether [dispose] has been called.
   bool get isDisposed => _disposed;
 
-  Future<void> dispose({int exitCode = 0}) async {
+  /// Tears down the watch session. When [shutdownFlutterApp] is true,
+  /// the Flutter app is explicitly terminated via `app.stop` and the
+  /// runtime-info file is removed. Default `false` leaves the app
+  /// alive so the next `serverpod start` can reattach; a breadcrumb
+  /// is logged at exit naming the surviving PID + attach URL.
+  Future<void> dispose({
+    int exitCode = 0,
+    bool shutdownFlutterApp = false,
+  }) async {
     if (_disposed) return;
     _disposed = true;
     stopFileWatcher();
@@ -108,7 +119,10 @@ class WatchLoopContext {
     await _step('closing the attach socket', () async => attachSocket?.close());
     await _step('closing the runner API', runnerApi.close);
     await _step('closing the analyzers', closeAnalyzers);
-    await _step('stopping the server', session.dispose);
+    await _step(
+      'stopping the server',
+      () => session.dispose(shutdownFlutterApp: shutdownFlutterApp),
+    );
     await _step('closing the VM service proxy', () async => proxy()?.close());
     await _step('stopping the Flutter apps', flutterManager.dispose);
     await _step(
@@ -120,6 +134,9 @@ class WatchLoopContext {
       () async => manifestPublisher?.dispose(),
     );
     await _step('stopping the Docker services', () async => stopDocker?.call());
+    if (!shutdownFlutterApp) {
+      await _step('logging the Flutter breadcrumb', _logFlutterBreadcrumb);
+    }
     await _step('releasing the lock', () async => lock?.release());
   }
 
@@ -134,6 +151,22 @@ class WatchLoopContext {
       await body();
     } catch (e) {
       log.warning('Failed while $what: $e');
+    }
+  }
+
+  Future<void> _logFlutterBreadcrumb() async {
+    for (final app in flutterManager.apps) {
+      final info = await readFlutterRuntimeInfo(serverpodToolDir, app.id);
+      if (info == null) continue;
+      log.info(
+        'Flutter app left running:\n'
+        '  App:     ${app.name}\n'
+        '  Device:  ${info.device}\n'
+        '  PID:     ${info.pid}\n'
+        '  Attach:  ${info.vmServiceUri}\n'
+        '  Reattach by re-running serverpod start, or kill with: '
+        'kill ${info.pid}',
+      );
     }
   }
 }
