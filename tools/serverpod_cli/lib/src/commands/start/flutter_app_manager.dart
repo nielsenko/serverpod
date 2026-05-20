@@ -323,6 +323,7 @@ class FlutterAppManager {
       ],
       flutterProxy: runtime.proxy,
       useDevFsReload: flutterDevfsReload,
+      runtimeInfoDir: serverpodToolDir,
       flutterExecutable: flutterExecutableForTesting ?? 'flutter',
       machineArgsOverride: argsOverrideForTesting?.call(runtime.app),
       stdoutSink: stdoutSinkFor(runtime.app),
