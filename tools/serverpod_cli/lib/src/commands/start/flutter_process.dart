@@ -6,6 +6,7 @@ import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_log_event.dart';
+import 'package:serverpod_cli/src/commands/start/flutter_runtime_info.dart';
 import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
 import 'package:serverpod_cli/src/commands/start/server_process.dart'
     show vmServiceWsUri;
@@ -128,6 +129,12 @@ class FlutterProcess {
 
   final String? _packagesPath;
 
+  /// Directory where `flutter-runtime.json` lives. When set,
+  /// [FlutterProcess] writes the runtime snapshot here after the VM
+  /// service comes up so the next session can detect a surviving app
+  /// and reattach. Removed only on explicit shutdown via [stop].
+  final String? _runtimeInfoDir;
+
   // `null` result means the process exited before publishing a URI.
   final Completer<String?> _vmServiceUriCompleter = Completer<String?>();
   final Completer<int> _exitCodeCompleter = Completer<int>();
@@ -151,6 +158,7 @@ class FlutterProcess {
     this.useDevFsReload = false,
     String? entryPoint,
     String? packagesPath,
+    String? runtimeInfoDir,
     @visibleForTesting List<String>? argsOverrideForTesting,
     @visibleForTesting Future<bool> Function(Uri url)? openBrowserForTesting,
   }) : _flutterPackageDir = flutterPackageDir,
@@ -167,6 +175,7 @@ class FlutterProcess {
        _machineArgsOverride = machineArgsOverride,
        _entryPoint = entryPoint,
        _packagesPath = packagesPath,
+       _runtimeInfoDir = runtimeInfoDir,
        _argsOverrideForTesting = argsOverrideForTesting,
        _openBrowserForTesting = openBrowserForTesting;
 
@@ -346,6 +355,7 @@ class FlutterProcess {
         await _subscribeToVmStreams(vm);
         _startVmServiceHeartbeat(vm);
         if (_compiler != null) await _bringUpDevFs(_vmService!);
+        await _writeRuntimeInfo();
         return;
       } on Exception {
         if (attempt == 4) {
@@ -354,6 +364,30 @@ class FlutterProcess {
         }
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
+    }
+  }
+
+  Future<void> _writeRuntimeInfo() async {
+    final dir = _runtimeInfoDir;
+    final appId = _appId;
+    final uri = _vmServiceUri;
+    final pid = _process?.pid;
+    if (dir == null || appId == null || uri == null || pid == null) return;
+    try {
+      await writeFlutterRuntimeInfo(
+        dir,
+        FlutterRuntimeInfo(
+          appId: appId,
+          vmServiceUri: uri,
+          pid: pid,
+          device: _device,
+          flutterPackageDir: p.absolute(_flutterPackageDir),
+          createdAt: DateTime.now(),
+        ),
+      );
+      log.debug('Flutter runtime info written (pid=$pid, uri=$uri)');
+    } catch (e) {
+      log.debug('Could not write flutter-runtime.json: $e');
     }
   }
 
