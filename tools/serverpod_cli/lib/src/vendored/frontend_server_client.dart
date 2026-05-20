@@ -96,7 +96,10 @@ class FrontendServerClient {
       '--target=$target',
       '--output-dill',
       outputDillPath,
-      if (packageConfigUri != null) '--packages=$packageConfigUri',
+      if (packagesJson != null) ...[
+        '--packages',
+        p.absolute(packagesJson),
+      ],
       if (nativeAssetsPath != null) ...[
         '--native-assets',
         p.absolute(nativeAssetsPath),
