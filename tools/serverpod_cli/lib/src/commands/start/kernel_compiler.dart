@@ -20,6 +20,8 @@ class KernelCompiler {
   final String entryPoint;
   final String outputDill;
   final String? packagesPath;
+  final String target;
+  final List<String> extraArgs;
 
   /// Native-assets manifest path forwarded as `--native-assets` to the
   /// Frontend Server on [start]. Mutable so callers can swap the manifest
@@ -27,13 +29,9 @@ class KernelCompiler {
   /// so changes require a [restart] to take effect.
   String? nativeAssetsPath;
 
-  late final String _sdkRoot = getSdkPath();
-  late final String _platformDill = p.join(
-    _sdkRoot,
-    'lib',
-    '_internal',
-    'vm_platform_strong.dill',
-  );
+  final String _dartSdk;
+  final String _sdkRoot;
+  final String _platformDill;
   late Future<FrontendServerClient> _client;
 
   bool _needsFullCompile = true;
@@ -44,10 +42,56 @@ class KernelCompiler {
     this.outputDill = '.dart_tool/serverpod/server.dill',
     this.packagesPath,
     this.nativeAssetsPath,
-  });
+    this.target = 'vm',
+    String? dartSdk,
+    String? sdkRoot,
+    String? platformDill,
+    this.extraArgs = const [],
+  }) : _dartSdk = dartSdk ?? getSdkPath(),
+       _sdkRoot = sdkRoot ?? dartSdk ?? getSdkPath(),
+       _platformDill =
+           platformDill ??
+           p.join(
+             sdkRoot ?? dartSdk ?? getSdkPath(),
+             'lib',
+             '_internal',
+             'vm_platform_strong.dill',
+           );
+
+  /// Construct a compiler for `target: flutter`, using the dart runtime
+  /// bundled with [flutterRoot] and its `flutter_patched_sdk` as the
+  /// compile-time SDK.
+  factory KernelCompiler.flutter({
+    required String flutterRoot,
+    required String entryPoint,
+    required String outputDill,
+    String? packagesPath,
+    List<String> extraArgs = const ['--track-widget-creation'],
+  }) {
+    final dartSdk = p.join(flutterRoot, 'bin', 'cache', 'dart-sdk');
+    final patchedSdk = p.join(
+      flutterRoot,
+      'bin',
+      'cache',
+      'artifacts',
+      'engine',
+      'common',
+      'flutter_patched_sdk',
+    );
+    return KernelCompiler(
+      entryPoint: entryPoint,
+      outputDill: outputDill,
+      packagesPath: packagesPath,
+      target: 'flutter',
+      dartSdk: dartSdk,
+      sdkRoot: patchedSdk,
+      platformDill: p.join(patchedSdk, 'platform_strong.dill'),
+      extraArgs: extraArgs,
+    );
+  }
 
   /// The path to the `dart` executable from the SDK used by this compiler.
-  String get dartExecutable => p.join(_sdkRoot, 'bin', 'dart');
+  String get dartExecutable => p.join(_dartSdk, 'bin', 'dart');
 
   /// Whether [start] has run.
   bool get isStarted => _started;
@@ -67,10 +111,12 @@ class KernelCompiler {
       entryPoint,
       outputDill,
       _platformDill,
+      dartSdk: _dartSdk,
       sdkRoot: _sdkRoot,
-      target: 'vm',
+      target: target,
       packagesJson: packagesPath,
       nativeAssetsPath: nativeAssetsPath,
+      extraArgs: extraArgs,
     );
     _started = true;
     _needsFullCompile = true;
