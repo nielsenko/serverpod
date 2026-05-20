@@ -422,14 +422,26 @@ class FlutterProcess {
     final appId = _runtimeInfoAppId;
     final daemonId = _daemonAppId;
     final uri = _vmServiceUri;
-    final pid = _process?.pid;
+    final vm = _vmService;
     if (dir == null ||
         appId == null ||
         daemonId == null ||
         uri == null ||
-        pid == null) {
+        vm == null) {
       return;
     }
+    // The app's dart VM PID, not flutter_tools'. flutter_tools is
+    // SIGKILLed at exit so its PID would always read as dead on the
+    // next session; the app PID survives across our process boundary
+    // and is what the reattach check probes for liveness.
+    int? appPid;
+    try {
+      appPid = (await vm.getVM()).pid;
+    } catch (e) {
+      log.debug('vmService.getVM() failed: $e (using flutter_tools PID)');
+    }
+    final pid = appPid ?? _process?.pid;
+    if (pid == null) return;
     try {
       await writeFlutterRuntimeInfo(
         dir,
