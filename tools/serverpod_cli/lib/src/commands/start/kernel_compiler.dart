@@ -21,6 +21,7 @@ class KernelCompiler {
   final String outputDill;
   final String? packagesPath;
   final String target;
+  final String? workingDirectory;
   final List<String> extraArgs;
 
   /// Native-assets manifest path forwarded as `--native-assets` to the
@@ -46,6 +47,7 @@ class KernelCompiler {
     String? dartSdk,
     String? sdkRoot,
     String? platformDill,
+    this.workingDirectory,
     this.extraArgs = const [],
   }) : _dartSdk = dartSdk ?? getSdkPath(),
        _sdkRoot = sdkRoot ?? dartSdk ?? getSdkPath(),
@@ -66,6 +68,7 @@ class KernelCompiler {
     required String entryPoint,
     required String outputDill,
     String? packagesPath,
+    String? workingDirectory,
     List<String> extraArgs = const ['--track-widget-creation'],
   }) {
     final dartSdk = p.join(flutterRoot, 'bin', 'cache', 'dart-sdk');
@@ -86,6 +89,7 @@ class KernelCompiler {
       dartSdk: dartSdk,
       sdkRoot: patchedSdk,
       platformDill: p.join(patchedSdk, 'platform_strong.dill'),
+      workingDirectory: workingDirectory,
       extraArgs: extraArgs,
     );
   }
@@ -116,6 +120,7 @@ class KernelCompiler {
       target: target,
       packagesJson: packagesPath,
       nativeAssetsPath: nativeAssetsPath,
+      workingDirectory: workingDirectory,
       extraArgs: extraArgs,
     );
     _started = true;
