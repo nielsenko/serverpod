@@ -274,6 +274,10 @@ class FlutterProcess {
 
     final invocation = await _resolveFlutterInvocation(_flutterExecutable);
 
+    if (_attachToVmServiceUri == null) {
+      await _ensurePubGetIfStale(invocation);
+    }
+
     if (devFsReloadSupported) {
       await _startCompiler(invocation.flutterRoot);
     } else if (useDevFsReload) {
@@ -676,6 +680,41 @@ class FlutterProcess {
         'Flutter FES failed to start: $e. Falling back to daemon-stdin '
         'reload.',
       );
+    }
+  }
+
+  /// Runs `flutter pub get` from the workspace/package dir that owns
+  /// `pubspec.lock` when `.dart_tool/package_config.json` is missing
+  /// or older than the lockfile. No-op when deps are current. Uses
+  /// the same direct-dart invocation as the main spawn so puro
+  /// wrappers don't sit between us and flutter_tools.
+  Future<void> _ensurePubGetIfStale(_FlutterInvocation invocation) async {
+    final pkgDir = p.normalize(p.absolute(_flutterPackageDir));
+    final packageConfig = _findPackageConfig(pkgDir);
+    final rootDir = p.dirname(p.dirname(packageConfig));
+    final lockFile = File(p.join(rootDir, 'pubspec.lock'));
+    final cfgFile = File(packageConfig);
+    if (!await lockFile.exists()) return;
+    if (await cfgFile.exists()) {
+      final lockMtime = (await lockFile.stat()).modified;
+      final cfgMtime = (await cfgFile.stat()).modified;
+      if (!lockMtime.isAfter(cfgMtime)) return;
+    }
+    log.debug('flutter pub get: package_config stale, refreshing');
+    try {
+      final result = await Process.run(
+        invocation.executable,
+        [...invocation.baseArgs, 'pub', 'get'],
+        workingDirectory: rootDir,
+      );
+      if (result.exitCode != 0) {
+        log.warning(
+          'flutter pub get exited ${result.exitCode}:\n'
+          '${result.stdout}\n${result.stderr}',
+        );
+      }
+    } catch (e) {
+      log.warning('flutter pub get failed to spawn: $e');
     }
   }
 
