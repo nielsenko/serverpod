@@ -595,6 +595,7 @@ class FlutterProcess {
         entryPoint: entry,
         outputDill: outputDill,
         packagesPath: packages,
+        workingDirectory: pkgDir,
       );
       await compiler.start();
       _compiler = compiler;
