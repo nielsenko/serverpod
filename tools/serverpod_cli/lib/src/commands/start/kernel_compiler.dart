@@ -108,8 +108,21 @@ class KernelCompiler {
   ///
   /// This starts the server in resident mode, ready to receive compile
   /// commands. Call [compile] to perform the initial compilation.
+  ///
+  /// When [outputDill] from a previous session exists, FES is started
+  /// with `--initialize-from-dill` pointing at it. The next [compile]
+  /// then produces an incremental delta rather than a full kernel,
+  /// shaving seconds off the first-reload latency.
   Future<void> start() async {
     if (_started) return;
+
+    final allArgs = [
+      ...extraArgs,
+      if (File(outputDill).existsSync()) ...[
+        '--initialize-from-dill',
+        outputDill,
+      ],
+    ];
 
     _client = FrontendServerClient.start(
       entryPoint,
@@ -121,7 +134,7 @@ class KernelCompiler {
       packagesJson: packagesPath,
       nativeAssetsPath: nativeAssetsPath,
       workingDirectory: workingDirectory,
-      extraArgs: extraArgs,
+      extraArgs: allArgs,
     );
     _started = true;
     _needsFullCompile = true;
