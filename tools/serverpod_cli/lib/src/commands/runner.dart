@@ -145,6 +145,16 @@ enum RunnerServeOption<V> implements OptionDefinition<V> {
           'push instead of the daemon-stdin app.restart.',
     ),
   ),
+  shutdownFlutterOnExit(
+    FlagOption(
+      argName: 'shutdown-flutter-on-exit',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Terminate the Flutter app when this runner exits, instead of '
+          'leaving it running for the next runner to reattach.',
+    ),
+  ),
   detached(
     FlagOption(
       argName: 'detached',
@@ -279,7 +289,12 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
           if (ctx.session.isRunning) log.info(serverRunning);
           final exitCode = await shutdown.future;
           log.info('Server stopped (exitCode: $exitCode).');
-          await ctx.dispose(exitCode: exitCode);
+          await ctx.dispose(
+            exitCode: exitCode,
+            shutdownFlutterApp: commandConfig.value(
+              RunnerServeOption.shutdownFlutterOnExit,
+            ),
+          );
           if (exitCode != 0) throw ExitException(exitCode);
       }
     } finally {

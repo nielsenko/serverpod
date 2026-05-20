@@ -125,6 +125,17 @@ enum StartOption<V> implements OptionDefinition<V> {
           'latency from seconds to ~200ms; non-web only for now.',
     ),
   ),
+  shutdownFlutterOnExit(
+    FlagOption(
+      argName: 'shutdown-flutter-on-exit',
+      defaultsTo: false,
+      negatable: false,
+      helpText:
+          'Terminate the Flutter app when the runner exits, instead of '
+          'leaving it running for the next `serverpod start` to reattach. '
+          'Useful for CI and one-shot scripts that expect clean teardown.',
+    ),
+  ),
   ;
 
   const StartOption(this.option);
@@ -176,6 +187,9 @@ class StartCommand extends ServerpodCommand<StartOption> {
       flutter: commandConfig.value(StartOption.flutter),
       docker: commandConfig.optionalValue(StartOption.docker),
       flutterDevfsReload: commandConfig.value(StartOption.flutterDevfsReload),
+      shutdownFlutterOnExit: commandConfig.value(
+        StartOption.shutdownFlutterOnExit,
+      ),
       serverArgs: argResults?.rest ?? const [],
     );
 

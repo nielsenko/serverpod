@@ -264,6 +264,7 @@ class RunnerConfig {
     required this.watch,
     required this.flutter,
     this.flutterDevfsReload = false,
+    this.shutdownFlutterOnExit = false,
     required this.serverArgs,
     this.docker,
   });
@@ -271,6 +272,7 @@ class RunnerConfig {
   final bool watch;
   final bool flutter;
   final bool flutterDevfsReload;
+  final bool shutdownFlutterOnExit;
   final List<String> serverArgs;
 
   /// Whether Docker Compose services are part of this stack.
@@ -293,6 +295,8 @@ class RunnerConfig {
     if (other.docker != null && docker != other.docker) '--docker',
     if (flutterDevfsReload != other.flutterDevfsReload)
       '--flutter-devfs-reload',
+    if (shutdownFlutterOnExit != other.shutdownFlutterOnExit)
+      '--shutdown-flutter-on-exit',
     if (!_serverArgsEqual.equals(serverArgs, other.serverArgs))
       'server arguments after --',
   ];
@@ -315,6 +319,7 @@ class RunnerConfig {
       if (watch) '--watch' else '--no-watch',
       if (flutter) '--flutter' else '--no-flutter',
       if (flutterDevfsReload) '--flutter-devfs-reload',
+      if (shutdownFlutterOnExit) '--shutdown-flutter-on-exit',
       if (docker == true) '--docker',
       if (docker == false) '--no-docker',
       if (serverArgs.isNotEmpty) ...['--', ...serverArgs],
@@ -326,6 +331,7 @@ class RunnerConfig {
     'flutter': flutter,
     if (docker != null) 'docker': docker,
     'flutterDevfsReload': flutterDevfsReload,
+    'shutdownFlutterOnExit': shutdownFlutterOnExit,
     'serverArgs': serverArgs,
   };
 
@@ -334,6 +340,7 @@ class RunnerConfig {
     flutter: json['flutter'] as bool? ?? true,
     docker: json['docker'] as bool?,
     flutterDevfsReload: json['flutterDevfsReload'] as bool? ?? false,
+    shutdownFlutterOnExit: json['shutdownFlutterOnExit'] as bool? ?? false,
     serverArgs: switch (json['serverArgs']) {
       final List<Object?> args => [for (final arg in args) '$arg'],
       _ => const [],
