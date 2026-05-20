@@ -278,6 +278,16 @@ class CompileResult {
     required this.newSources,
   });
 
+  /// A no-op result that signals the cached dill at [dillOutput] is
+  /// still valid. Used by [KernelCompiler] to short-circuit when the
+  /// caller passes no changed paths - we skip the FES round-trip
+  /// (which would otherwise default to invalidating the entrypoint
+  /// and re-walking the dependency graph for no actual work).
+  const CompileResult.unchanged(String this.dillOutput)
+    : compilerOutputLines = const [],
+      errorCount = 0,
+      newSources = const [];
+
   final String? dillOutput;
   final Iterable<String> compilerOutputLines;
   final int errorCount;

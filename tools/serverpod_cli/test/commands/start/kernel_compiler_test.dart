@@ -15,7 +15,7 @@ void main() {
     await closeLogger();
   });
 
-  group('Given a KernelCompiler with a valid Dart project', () {
+  group('Given a KernelCompiler with a valid Dart project,', () {
     late Directory tempDir;
     late KernelCompiler compiler;
 
@@ -122,6 +122,47 @@ void main() {
 
         // Absent files do not throw.
         await compiler.invalidateCachedDill();
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+
+    test(
+      'when compile is called with no changed paths, '
+      'then it reuses the cached dill without invoking the compiler',
+      () async {
+        final incrementalDill = File('${compiler.outputDill}.incremental.dill');
+
+        await compiler.start();
+        await compiler.compile();
+        await compiler.accept();
+        if (incrementalDill.existsSync()) incrementalDill.deleteSync();
+
+        final result = await compiler.compile();
+        await compiler.accept();
+
+        expect(result.errorCount, 0);
+        expect(result.dillOutput, compiler.outputDill);
+        expect(incrementalDill.existsSync(), isFalse);
+      },
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+
+    test(
+      'when compile is called with no changed paths but an invalidated package config, '
+      'then it still recompiles so the package map is re-read',
+      () async {
+        final incrementalDill = File('${compiler.outputDill}.incremental.dill');
+
+        await compiler.start();
+        await compiler.compile();
+        await compiler.accept();
+        if (incrementalDill.existsSync()) incrementalDill.deleteSync();
+
+        final result = await compiler.compile(invalidatePackageConfig: true);
+        await compiler.accept();
+
+        expect(result.errorCount, 0);
+        expect(incrementalDill.existsSync(), isTrue);
       },
       timeout: const Timeout(Duration(seconds: 60)),
     );
