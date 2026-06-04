@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cli_tools/cli_tools.dart';
 import 'package:config/config.dart';
 import 'package:path/path.dart' as p;
@@ -58,14 +60,16 @@ class MigrateCommand extends ServerpodCommand<MigrateOption> {
       throw ExitException(ServerpodCommand.commandInvokedCannotExecute);
     }
 
-    final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
+    final serverDirectory = Directory(
+      p.joinAll(config.serverPackageDirectoryPathParts),
+    );
     final moduleName = config.name;
 
     log.info('Applying migrations for "$moduleName" (mode: $runMode)...');
 
     try {
       await applyPendingMigrations(
-        serverDir: serverDir,
+        serverDirectory: serverDirectory,
         runMode: runMode,
         moduleName: moduleName,
       );
