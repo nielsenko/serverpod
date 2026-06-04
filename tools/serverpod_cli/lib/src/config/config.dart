@@ -124,6 +124,11 @@ class GeneratorConfig implements ModelLoadConfig {
   /// is located. Anchored at [GeneratorConfig.load] time.
   final List<String> serverPackageDirectoryPathParts;
 
+  /// The server package directory, anchored at [GeneratorConfig.load] time.
+  /// Assembled from [serverPackageDirectoryPathParts].
+  Directory get serverPackageDirectory =>
+      Directory(p.joinAll(serverPackageDirectoryPathParts));
+
   /// The path parts to packages of shared models.
   /// The key is the package name, the value is the path parts to the package
   /// relative to the server package.
