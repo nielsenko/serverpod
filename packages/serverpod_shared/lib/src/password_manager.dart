@@ -97,11 +97,11 @@ class PasswordManager {
 
   /// Load all passwords for the current run mode.
   ///
-  /// [serverDir] is the directory the `config/` folder lives under; when
+  /// [serverDirectory] is the directory the `config/` folder lives under; when
   /// omitted the path is resolved relative to the current directory.
-  Map<String, String> loadPasswords({String? serverDir}) {
+  Map<String, String> loadPasswords({Directory? serverDirectory}) {
     final passwordsFilePath = ServerpodConfig.passwordsConfigPath(
-      serverDir: serverDir,
+      serverDirectory: serverDirectory,
     );
     final file = File(passwordsFilePath);
     Map<String, Map> data = {};
