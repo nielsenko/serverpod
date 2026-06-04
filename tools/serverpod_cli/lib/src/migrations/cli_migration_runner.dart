@@ -8,7 +8,7 @@ import 'package:serverpod_database/serverpod_database.dart';
 /// Runs the project's pending database migrations from outside the pod.
 ///
 /// Reads `config/<runMode>.yaml` and `config/passwords.yaml` from
-/// [serverDir], opens a database connection with the same config the
+/// [serverDirectory], opens a database connection with the same config the
 /// pod would use, and applies pending migrations via
 /// [MigrationManager]. Returns the list of versions applied (empty if
 /// the database was already up to date).
@@ -22,11 +22,11 @@ import 'package:serverpod_database/serverpod_database.dart';
 /// expected module name; if the migration definition's module name
 /// disagrees, the manager logs a warning.
 Future<List<String>> applyPendingMigrations({
-  required String serverDir,
+  required Directory serverDirectory,
   required String runMode,
   required String moduleName,
 }) async {
-  final config = ConfigInfo(runMode, serverDir: serverDir).config;
+  final config = ConfigInfo(runMode, serverDirectory: serverDirectory).config;
   final dbConfig = config.database;
   if (dbConfig == null) {
     throw StateError('No database configured for run mode "$runMode".');
@@ -37,7 +37,7 @@ Future<List<String>> applyPendingMigrations({
   final pool = DatabaseProvider.forDialect(dbConfig.dialect).createPoolManager(
     serializationManager,
     null,
-    dbConfig.withResolvedLocalPath(serverDir),
+    dbConfig.withResolvedLocalPath(serverDirectory.path),
   );
   await pool.started;
 
@@ -52,7 +52,7 @@ Future<List<String>> applyPendingMigrations({
     );
 
     final manager = MigrationManager.fromDirectory(
-      Directory(serverDir),
+      serverDirectory,
       runMode: runMode,
     );
     final applied = await manager.migrateToLatest(session);
