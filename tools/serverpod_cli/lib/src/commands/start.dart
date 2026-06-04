@@ -462,12 +462,12 @@ List<String> _withApplyMigrations(List<String> serverArgs) {
 /// migrations by calling the running pod's `applyMigrations` endpoint. The
 /// pod itself runs the migration in-process; the CLI only triggers it.
 Future<void> _applyMigrationsForSession({
-  required String serverDir,
+  required Directory serverDirectory,
   required String runMode,
 }) async {
   final client = ConfigInfo(
     runMode,
-    serverDir: serverDir,
+    serverDirectory: serverDirectory,
   ).createServiceClient();
   try {
     await client.insights.applyMigrations(
@@ -869,7 +869,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       setupFileWatcher();
     },
     applyMigrationsAction: () => _applyMigrationsForSession(
-      serverDir: serverDir,
+      serverDirectory: Directory(serverDir),
       runMode: runMode,
     ),
   );

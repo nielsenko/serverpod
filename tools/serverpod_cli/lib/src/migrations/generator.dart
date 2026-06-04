@@ -233,7 +233,7 @@ class MigrationGenerator {
 
     var client = ConfigInfo(
       runMode,
-      serverDir: path.normalize(path.absolute(directory.path)),
+      serverDirectory: directory,
     ).createServiceClient();
     DatabaseDefinition liveDatabase;
     try {
