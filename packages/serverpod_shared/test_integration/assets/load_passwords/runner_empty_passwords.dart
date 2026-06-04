@@ -3,7 +3,7 @@ import 'package:serverpod_shared/serverpod_shared.dart';
 
 void main() {
   var passwords = PasswordManager(runMode: 'development').loadPasswords(
-    serverDir: 'empty',
+    serverDirectory: Directory('empty'),
   );
 
   stdout.write(passwords.toString());
