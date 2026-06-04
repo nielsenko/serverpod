@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:path/path.dart' as path;
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/analytics/cli_analytics.dart';
 import 'package:serverpod_cli/src/analytics/migration_metrics.dart';
@@ -53,9 +52,7 @@ Future<File?> createRepairMigrationAction({
     );
   }
 
-  final serverDirectory = Directory(
-    path.joinAll(config.serverPackageDirectoryPathParts),
-  );
+  final serverDirectory = config.serverPackageDirectory;
 
   final projectName = await getProjectName(serverDirectory);
   if (projectName == null) {
