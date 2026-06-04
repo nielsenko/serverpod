@@ -66,7 +66,7 @@ void main() {
       'then database contains new tables.',
       () async {
         final result = await applyPendingMigrations(
-          serverDir: Directory.current.path,
+          serverDirectory: Directory.current,
           runMode: 'production',
           moduleName: 'serverpod_test',
         );
@@ -111,7 +111,7 @@ void main() {
         logWriter.add(testWriter);
 
         final result = await applyPendingMigrations(
-          serverDir: Directory.current.path,
+          serverDirectory: Directory.current,
           runMode: 'production',
           moduleName: 'serverpod_test',
         );
