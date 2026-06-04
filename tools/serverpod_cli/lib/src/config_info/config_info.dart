@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:serverpod_service_client/serverpod_service_client.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
@@ -5,15 +7,19 @@ class ConfigInfo {
   String? serverId;
   late ServerpodConfig config;
 
-  ConfigInfo(String runMode, {required String serverDir, this.serverId}) {
+  ConfigInfo(
+    String runMode, {
+    required Directory serverDirectory,
+    this.serverId,
+  }) {
     var passwords = PasswordManager(runMode: runMode).loadPasswords(
-      serverDir: serverDir,
+      serverDirectory: serverDirectory,
     );
     config = ServerpodConfig.load(
       runMode,
       serverId,
       passwords,
-      serverDir: serverDir,
+      serverDirectory: serverDirectory,
     );
   }
 

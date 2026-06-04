@@ -685,7 +685,7 @@ bool stackServesWeb(ServerpodAddresses? addresses, ServerpodConfig? config) {
 ///
 /// Null is normal mid-setup, and callers fall back to their defaults.
 ServerpodConfig? _loadServerConfig({
-  required String serverDir,
+  required Directory serverDirectory,
   required String runMode,
 }) {
   try {
@@ -887,7 +887,7 @@ Future<void> _applyMigrationsForSession({
 }) async {
   final client = ConfigInfo(
     runMode,
-    serverDir: serverDir,
+    serverDirectory: serverDirectory,
   ).createServiceClientFor(insightsAddress);
   try {
     await client.insights.applyMigrations(
@@ -953,7 +953,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   final attachSocket = RunnerSocketServer(serverDir: serverDir);
 
   final serverConfig = _loadServerConfig(
-    serverDir: serverDir,
+    serverDirectory: Directory(serverDir),
     runMode: runMode,
   );
 
@@ -1375,7 +1375,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         setupFileWatcher();
       },
       applyMigrationsAction: () => _applyMigrationsForSession(
-        serverDir: serverDir,
+        serverDirectory: Directory(serverDir),
         runMode: runMode,
         insightsAddress: reportedInsights('applying migrations'),
       ),
