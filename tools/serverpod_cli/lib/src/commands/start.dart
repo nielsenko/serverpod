@@ -1023,7 +1023,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   final attachSocket = RunnerSocketServer(serverDir: serverDir);
 
   final serverConfig = _loadServerConfig(
-    serverDirectory: Directory(serverDir),
+    serverDirectory: config.serverPackageDirectory,
     runMode: runMode,
   );
 
@@ -1449,7 +1449,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         setupFileWatcher();
       },
       applyMigrationsAction: () => _applyMigrationsForSession(
-        serverDirectory: Directory(serverDir),
+        serverDirectory: config.serverPackageDirectory,
         runMode: runMode,
         insightsAddress: reportedInsights('applying migrations'),
       ),
