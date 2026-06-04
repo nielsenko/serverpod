@@ -269,19 +269,19 @@ class ServerpodConfig {
   /// Loads and parses a server configuration file. Picks config file depending
   /// on run mode.
   ///
-  /// [serverDir] is the directory the `config/` folder lives under.
+  /// [serverDirectory] is the directory the `config/` folder lives under.
   factory ServerpodConfig.load(
     String runMode,
     String? serverId,
     Map<String, String> passwords, {
     Map<String, dynamic>? commandLineArgs,
-    String? serverDir,
+    Directory? serverDirectory,
   }) {
     dynamic doc = {};
 
-    if (isConfigAvailable(runMode, serverDir: serverDir)) {
+    if (isConfigAvailable(runMode, serverDirectory: serverDirectory)) {
       String data = File(
-        _createConfigPath(runMode, serverDir: serverDir),
+        _createConfigPath(runMode, serverDirectory: serverDirectory),
       ).readAsStringSync();
       doc = loadYaml(data);
     }
@@ -350,27 +350,32 @@ class ServerpodConfig {
   }
 
   /// Checks if a configuration file is available on disk for the given run mode.
-  static bool isConfigAvailable(String runMode, {String? serverDir}) {
+  static bool isConfigAvailable(String runMode, {Directory? serverDirectory}) {
     return File(
-      _createConfigPath(runMode, serverDir: serverDir),
+      _createConfigPath(runMode, serverDirectory: serverDirectory),
     ).existsSync();
   }
 
-  static String _createConfigPath(String runMode, {String? serverDir}) {
-    return path.joinAll([
-      ?serverDir,
-      'config',
-      '$runMode.yaml',
-    ]);
+  static String _createConfigPath(
+    String runMode, {
+    Directory? serverDirectory,
+  }) {
+    return _configFilePath('$runMode.yaml', serverDirectory: serverDirectory);
   }
 
-  /// Returns the path to `config/passwords.yaml` under [serverDir]
-  /// (or cwd-relative when [serverDir] is null).
-  static String passwordsConfigPath({String? serverDir}) {
+  /// Returns the path to `config/passwords.yaml` under [serverDirectory]
+  /// (or cwd-relative when [serverDirectory] is null).
+  static String passwordsConfigPath({Directory? serverDirectory}) {
+    return _configFilePath('passwords.yaml', serverDirectory: serverDirectory);
+  }
+
+  /// Joins [fileName] under the `config/` folder of [serverDirectory]
+  /// (or cwd-relative when [serverDirectory] is null).
+  static String _configFilePath(String fileName, {Directory? serverDirectory}) {
     return path.joinAll([
-      ?serverDir,
+      ?serverDirectory?.path,
       'config',
-      'passwords.yaml',
+      fileName,
     ]);
   }
 

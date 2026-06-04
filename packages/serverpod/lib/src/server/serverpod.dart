@@ -546,7 +546,7 @@ class Serverpod {
     // Load passwords
     _passwordManager = PasswordManager(runMode: runMode);
     _passwords = _passwordManager.loadPasswords(
-      serverDir: serverDirectory.path,
+      serverDirectory: serverDirectory,
     );
 
     // Because `.copyWith` is not a real copyWith method (`null` is not a valid
@@ -572,7 +572,7 @@ class Serverpod {
             serverId,
             _passwords,
             commandLineArgs: _commandLineArgs.toMap(),
-            serverDir: serverDirectory.path,
+            serverDirectory: serverDirectory,
           );
     } on ArgumentError catch (e) {
       throw ExitException(1, 'Error loading ServerpodConfig: ${e.message}');
