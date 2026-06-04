@@ -873,7 +873,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       setupFileWatcher();
     },
     applyMigrationsAction: () => _applyMigrationsForSession(
-      serverDirectory: Directory(serverDir),
+      serverDirectory: config.serverPackageDirectory,
       runMode: runMode,
     ),
   );

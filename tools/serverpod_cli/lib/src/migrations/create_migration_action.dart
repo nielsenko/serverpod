@@ -92,9 +92,7 @@ Future<CreateMigrationOutcome> createMigrationAction({
     );
   }
 
-  final serverDirectory = Directory(
-    path.joinAll(config.serverPackageDirectoryPathParts),
-  );
+  final serverDirectory = config.serverPackageDirectory;
 
   final projectName = await getProjectName(serverDirectory);
   if (projectName == null) {
