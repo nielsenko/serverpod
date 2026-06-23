@@ -104,6 +104,11 @@ class KernelCompiler {
   /// Whether [start] has run.
   bool get isStarted => _started;
 
+  /// Whether the most recent [compile] short-circuited as unchanged without a
+  /// FES round-trip. Callers that ship the dill elsewhere (e.g. a DevFS push)
+  /// read this to decide whether there is new output to send.
+  bool get lastCompileWasNoOp => _lastWasNoOp;
+
   /// Exists while the Frontend Server may be writing [outputDill]; left
   /// behind if the session dies mid-compile.
   String get _compileMarkerPath => '$outputDill.compiling';
