@@ -125,10 +125,6 @@ class FlutterProcess {
 
   final bool useDevFsReload;
 
-  final String? _entryPoint;
-
-  final String? _packagesPath;
-
   /// Directory where the per-app `flutter-runtime-<appId>.json` snapshot
   /// lives. When set together with [_runtimeInfoAppId], [FlutterProcess]
   /// writes the runtime snapshot here after the VM service comes up so the
@@ -166,8 +162,6 @@ class FlutterProcess {
     IOSink? stderrSink,
     List<String>? machineArgsOverride,
     this.useDevFsReload = false,
-    String? entryPoint,
-    String? packagesPath,
     String? runtimeInfoDir,
     String? runtimeInfoAppId,
     String? attachToVmServiceUri,
@@ -185,8 +179,6 @@ class FlutterProcess {
        _stderr = stderrSink ?? stderr,
        _launchBrowser = device == flutterDeviceWebServerWithBrowser,
        _machineArgsOverride = machineArgsOverride,
-       _entryPoint = entryPoint,
-       _packagesPath = packagesPath,
        _runtimeInfoDir = runtimeInfoDir,
        _runtimeInfoAppId = runtimeInfoAppId,
        _attachToVmServiceUri = attachToVmServiceUri,
@@ -404,8 +396,11 @@ class FlutterProcess {
         _vmService = vm;
         await _subscribeToVmStreams(vm);
         _startVmServiceHeartbeat(vm);
-        if (_compiler != null) await _bringUpDevFs(_vmService!);
+        // Write the reattach breadcrumb first: it only needs the URI and must
+        // not wait on the DevFS bring-up (which blocks on app.started and may
+        // ship an initial resync push).
         await _writeRuntimeInfo();
+        if (_compiler != null) await _bringUpDevFs(_vmService!);
         return;
       } on Exception {
         if (attempt == 4) {
@@ -621,7 +616,18 @@ class FlutterProcess {
   }
 
   /// Hot restart: full app reinit, state lost.
-  Future<bool> restart() => _appRestart(fullRestart: true);
+  ///
+  /// A full restart recreates the root isolate, so an active DevFS pipeline
+  /// (its captured isolate id and named filesystem) is stale afterwards.
+  /// Rebuild it before the next reload, otherwise [_devFsReload] would target
+  /// the collected pre-restart isolate and every later reload would fail.
+  Future<bool> restart() async {
+    final ok = await _appRestart(fullRestart: true);
+    if (ok && _compiler != null) {
+      await _rebindDevFsAfterRestart();
+    }
+    return ok;
+  }
 
   Future<void> _startCompiler(String? flutterRoot) async {
     if (flutterRoot == null) {
@@ -632,14 +638,10 @@ class FlutterProcess {
       return;
     }
     final pkgDir = p.normalize(p.absolute(_flutterPackageDir));
-    final entry = p.normalize(
-      p.absolute(_entryPoint ?? p.join(pkgDir, 'lib', 'main.dart')),
-    );
+    final entry = p.normalize(p.absolute(p.join(pkgDir, 'lib', 'main.dart')));
     // Dart workspaces keep package_config.json at the workspace root,
     // not in each member package; walk up until we find it.
-    final packages = p.normalize(
-      p.absolute(_packagesPath ?? _findPackageConfig(pkgDir)),
-    );
+    final packages = p.normalize(p.absolute(_findPackageConfig(pkgDir)));
     final outputDill = p.normalize(
       p.absolute(p.join(pkgDir, '.dart_tool', 'serverpod', 'flutter.dill')),
     );
@@ -725,13 +727,12 @@ class FlutterProcess {
     if (_process == null) return;
 
     try {
-      final vm = await vmService.getVM();
-      final isolates = vm.isolates ?? const [];
-      if (isolates.isEmpty) {
-        log.warning('Flutter VM reports no isolates; DevFS reload disabled.');
+      final isolateId = await _resolveUiIsolateId(vmService);
+      if (isolateId == null) {
+        log.warning('Flutter VM reports no UI isolate; DevFS reload disabled.');
         return;
       }
-      _isolateId = isolates.first.id;
+      _isolateId = isolateId;
       log.debug('Flutter DevFS: isolate $_isolateId, creating $_devFsName');
 
       final devFS = DevFS(
@@ -742,11 +743,64 @@ class FlutterProcess {
       final baseUri = await devFS.create();
       _devFS = devFS;
       log.debug('Flutter DevFS: ready at $baseUri');
+
+      // On reattach the running app holds whatever code it had when the
+      // previous session detached; on-disk sources may have moved on while
+      // serverpod was down. Ship a full current kernel now so the app resyncs
+      // before the first incremental reload, which would otherwise compute a
+      // delta against a baseline the running app never saw.
+      if (_attachToVmServiceUri != null) {
+        await _compiler!.reset();
+        log.debug('Flutter DevFS: resyncing reattached app to current sources');
+        await _devFsReload(const {});
+      }
     } on RPCError catch (e) {
       log.warning('Flutter DevFS bring-up failed: $e');
     } catch (e) {
       log.warning('Flutter DevFS bring-up unexpected error: $e');
     }
+  }
+
+  /// Resolves the Flutter UI isolate (the one hosting the widget tree) via
+  /// `_flutter.listViews`, falling back to the first app isolate. The view's
+  /// isolate is the correct reload target: `vm.isolates.first` can surface a
+  /// background/`compute` isolate on a multi-isolate app, and reloadSources +
+  /// ext.flutter.reassemble only take effect on the UI isolate.
+  Future<String?> _resolveUiIsolateId(VmService vmService) async {
+    try {
+      final response = await vmService.callServiceExtension(
+        '_flutter.listViews',
+      );
+      final views = response.json?['views'];
+      if (views is List) {
+        for (final view in views) {
+          final isolate = view is Map ? view['isolate'] : null;
+          final id = isolate is Map ? isolate['id'] : null;
+          if (id is String) return id;
+        }
+      }
+    } catch (e) {
+      log.debug('Flutter listViews failed ($e); using first isolate.');
+    }
+    final vm = await vmService.getVM();
+    final isolates = vm.isolates ?? const [];
+    return isolates.isEmpty ? null : isolates.first.id;
+  }
+
+  /// Rebuilds the DevFS pipeline after a hot restart recreated the root
+  /// isolate. Drops the stale filesystem and isolate id, forces the next
+  /// compile to a complete kernel (the fresh isolate needs a full one), then
+  /// brings the DevFS back up bound to the new isolate.
+  Future<void> _rebindDevFsAfterRestart() async {
+    final vmService = _vmService;
+    if (_compiler == null || vmService == null) return;
+    try {
+      await _devFS?.destroy();
+    } catch (_) {}
+    _devFS = null;
+    _isolateId = null;
+    await _compiler!.reset();
+    await _bringUpDevFs(vmService);
   }
 
   Future<bool> _devFsReload(Set<String> changedPaths) async {
@@ -769,11 +823,13 @@ class FlutterProcess {
         return false;
       }
 
-      // No source changes -> dill on the VM is already current; skip
-      // the DevFS push (~MB upload) and reloadSources (~100-500ms
-      // VM-side rebind), just reassemble the widget tree. This is the
-      // 'IDE Hot Reload button after no edits' path.
-      if (changedPaths.isEmpty) {
+      // When the compile produced no new output (FES short-circuited as
+      // unchanged), the dill on the VM is already current; skip the DevFS
+      // push (~MB upload) and reloadSources (~100-500ms VM-side rebind) and
+      // just reassemble the widget tree. This is the 'IDE Hot Reload button
+      // after no edits' path. A forced full compile (e.g. reattach/restart
+      // resync) is not a no-op, so it still pushes even with no changedPaths.
+      if (compiler.lastCompileWasNoOp) {
         log.debug('Flutter reload: reassemble-only (no source changes)');
       } else {
         await devFS.writeFiles({
@@ -796,7 +852,7 @@ class FlutterProcess {
         'ext.flutter.reassemble',
         isolateId: isolateId,
       );
-      compiler.accept();
+      await compiler.accept();
       return true;
     } catch (e) {
       log.warning('Flutter DevFS reload failed: $e');
