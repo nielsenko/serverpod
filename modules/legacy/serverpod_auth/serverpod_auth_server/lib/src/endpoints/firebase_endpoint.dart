@@ -37,7 +37,19 @@ class FirebaseEndpoint extends Endpoint {
       session.log('Verified idToken', level: LogLevel.debug);
       var claims = token.claims;
 
-      var email = claims.email?.toLowerCase();
+      // Firebase hands out tokens for self-registered addresses with
+      // `email_verified: false`, and the address alone is enough to reach an
+      // existing account below. Treat an unverified address as no address:
+      // the sign-in still works, it just cannot claim to be anyone.
+      var email = claims.emailVerified == true
+          ? claims.email?.toLowerCase()
+          : null;
+      if (email == null && claims.email != null) {
+        session.log(
+          'Ignoring unverified Firebase email claim',
+          level: LogLevel.debug,
+        );
+      }
       var userIdentifier = token.claims.subject;
       var fullName = token.claims.name;
       var userName = token.claims.nickname ?? email?.split('@').firstOrNull;
