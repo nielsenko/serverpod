@@ -113,3 +113,13 @@ http.Client appleKeysClient({
     );
   });
 }
+
+/// A second throwaway key pair, standing in for the key Apple rotates to.
+///
+/// Only the public half is needed: tests sign with [appleTestPrivateJwk] and
+/// serve this instead to model a JWKS that has moved on.
+final appleTestRotatedPublicJwk = <String, dynamic>{
+  ...appleTestPublicJwk,
+  'kid': 'apple-rotated-key',
+  'n': appleTestPublicJwk['n']!.toString().replaceRange(0, 4, 'zzzz'),
+};
