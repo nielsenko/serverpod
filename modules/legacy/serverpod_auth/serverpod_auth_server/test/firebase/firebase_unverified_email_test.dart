@@ -36,7 +36,10 @@ void main() {
       expect(user, isNotNull, reason: 'The victim account must exist.');
     });
 
-    tearDown(() => FirebaseAuth.authManagerOverride = null);
+    tearDown(() {
+      FirebaseAuth.authManagerOverride = null;
+      AuthConfig.set(AuthConfig());
+    });
 
     test(
       'when a Firebase token carries the account\'s email unverified, '
@@ -88,8 +91,34 @@ void main() {
 
     test(
       'when a Firebase token carries the account\'s email verified, '
-      'then it signs in as that account.',
+      'then a separate account is used.',
       () async {
+        _installFirebaseAuthManager(uid: attackerUid);
+
+        final response = await endpoints.firebase.authenticate(
+          sessionBuilder,
+          generateMockIdToken(
+            uid: attackerUid,
+            overrides: {'email': victimEmail, 'email_verified': true},
+          ),
+        );
+
+        expect(response.success, isTrue, reason: response.failReason?.name);
+        expect(
+          response.userInfo?.userIdentifier,
+          attackerUid,
+          reason:
+              'Verifying the address proves the mailbox, not that the caller '
+              'holds the password account already using it.',
+        );
+      },
+    );
+
+    test(
+      'when account linking by email is enabled and the email is verified, '
+      'then the existing account is used.',
+      () async {
+        AuthConfig.set(AuthConfig(linkSocialSignInsByEmail: true));
         _installFirebaseAuthManager(uid: attackerUid);
 
         final response = await endpoints.firebase.authenticate(
@@ -104,9 +133,32 @@ void main() {
         expect(
           response.userInfo?.email,
           victimEmail,
+          reason: 'The opt-in restores the pre-4.0.0-beta.4 behaviour.',
+        );
+      },
+    );
+
+    test(
+      'when account linking by email is enabled but the email is unverified, '
+      'then a separate account is still used.',
+      () async {
+        AuthConfig.set(AuthConfig(linkSocialSignInsByEmail: true));
+        _installFirebaseAuthManager(uid: attackerUid);
+
+        final response = await endpoints.firebase.authenticate(
+          sessionBuilder,
+          generateMockIdToken(
+            uid: attackerUid,
+            overrides: {'email': victimEmail, 'email_verified': false},
+          ),
+        );
+
+        expect(
+          response.userInfo?.userIdentifier,
+          attackerUid,
           reason:
-              'A verified address is the documented way legacy Firebase '
-              'sign-ins reach an existing account; that behaviour stands.',
+              'Opting into email linking opts into linking on *verified* '
+              'addresses; an unverified one still identifies nobody.',
         );
       },
     );

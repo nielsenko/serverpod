@@ -188,6 +188,22 @@ class AuthConfig {
   /// of a Sign in with Apple identity token. Defaults to 1 minute.
   final Duration appleIdentityTokenClockSkewTolerance;
 
+  /// Whether an Apple or Firebase sign in may attach to an existing account
+  /// that merely shares its email address. Defaults to false.
+  ///
+  /// An email address is not an authentication factor: it says which mailbox a
+  /// provider associates with the account, not that the caller controls the
+  /// account already holding it here. Linking on it means any provider that
+  /// can be talked into vouching for an address can reach the matching local
+  /// account, whatever it was originally registered with.
+  ///
+  /// Accounts created by an Apple or Firebase sign in are found by their
+  /// provider subject either way, so this only affects reaching an account
+  /// that was first registered some other way - typically with a password.
+  /// Enabling it restores the pre-4.0.0-beta.4 behaviour for deployments that
+  /// depend on it.
+  final bool linkSocialSignInsByEmail;
+
   /// The maximum length of passwords when signing up with email.
   /// Default is 128 characters.
   final int maxPasswordLength;
@@ -236,6 +252,7 @@ class AuthConfig {
         'config/firebase_service_account_key.json',
     this.appleClientIds = const {},
     this.appleIdentityTokenClockSkewTolerance = const Duration(minutes: 1),
+    this.linkSocialSignInsByEmail = false,
     this.maxPasswordLength = 128,
     this.minPasswordLength = 8,
     this.allowUnsecureRandom = false,

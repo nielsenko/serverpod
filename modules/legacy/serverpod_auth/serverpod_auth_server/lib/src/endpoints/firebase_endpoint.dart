@@ -58,11 +58,12 @@ class FirebaseEndpoint extends Endpoint {
       session.log('Got email: $email', level: LogLevel.debug);
       session.log('Got userIdentifier: $userIdentifier', level: LogLevel.debug);
 
-      UserInfo? userInfo;
-      if (email != null) {
+      var userInfo = await Users.findUserByIdentifier(session, userIdentifier);
+      if (userInfo == null &&
+          email != null &&
+          AuthConfig.current.linkSocialSignInsByEmail) {
         userInfo = await Users.findUserByEmail(session, email);
       }
-      userInfo ??= await Users.findUserByIdentifier(session, userIdentifier);
       if (userInfo == null) {
         userInfo = UserInfo(
           userIdentifier: userIdentifier,

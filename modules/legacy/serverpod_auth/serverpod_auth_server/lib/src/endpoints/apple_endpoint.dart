@@ -1,5 +1,6 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_server/src/business/apple_auth.dart';
+import 'package:serverpod_auth_server/src/business/config.dart';
 import 'package:serverpod_auth_server/src/business/user_authentication.dart';
 
 import '../business/users.dart';
@@ -49,9 +50,12 @@ class AppleEndpoint extends Endpoint {
     var fullName = authInfo.fullName;
     var name = authInfo.nickname;
 
-    UserInfo? userInfo;
-    if (email != null) userInfo = await Users.findUserByEmail(session, email);
-    userInfo ??= await Users.findUserByIdentifier(session, userIdentifier);
+    var userInfo = await Users.findUserByIdentifier(session, userIdentifier);
+    if (userInfo == null &&
+        email != null &&
+        AuthConfig.current.linkSocialSignInsByEmail) {
+      userInfo = await Users.findUserByEmail(session, email);
+    }
     if (userInfo == null) {
       userInfo = UserInfo(
         userIdentifier: userIdentifier,
