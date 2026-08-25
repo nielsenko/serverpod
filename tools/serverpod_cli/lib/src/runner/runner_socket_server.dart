@@ -111,27 +111,51 @@ class RunnerSocketServer {
     final peer = json_rpc.Peer(socketChannel(socket));
     _register(peer);
 
-    unawaited(
-      peer.listen().whenComplete(() {
-        _peers.remove(peer);
-        _sockets.remove(socket);
-      }),
-    );
+    unawaited(_serve(peer, socket));
+  }
+
+  /// Serves [peer] until it goes away, then forgets it.
+  ///
+  /// A client that drops mid-message ends its peer with an error; that is a
+  /// disconnect, not a runner fault, so it must not escape as an unhandled
+  /// error and take the runner's event forwarding with it.
+  Future<void> _serve(json_rpc.Peer peer, Socket socket) async {
+    try {
+      await peer.listen();
+    } catch (_) {
+      // Disconnected.
+    } finally {
+      _peers.remove(peer);
+      _sockets.remove(socket);
+    }
   }
 
   void _register(json_rpc.Peer peer) {
     peer.registerMethod(
       runnerSnapshotMethod,
-      () => _withRunner((runner) => runner.snapshot().toJson()),
+      (json_rpc.Parameters _) =>
+          _withRunner((runner) => runner.snapshot().toJson()),
     );
 
-    peer.registerMethod('hotReload', () => _run((r) => r.hotReload()));
-    peer.registerMethod('hotRestart', () => _run((r) => r.hotRestart()));
-    peer.registerMethod('retryStart', () => _run((r) => r.retryStart()));
-    peer.registerMethod('stop', () => _run((r) => r.stop()));
+    peer.registerMethod(
+      'hotReload',
+      (json_rpc.Parameters _) => _run((r) => r.hotReload()),
+    );
+    peer.registerMethod(
+      'hotRestart',
+      (json_rpc.Parameters _) => _run((r) => r.hotRestart()),
+    );
+    peer.registerMethod(
+      'retryStart',
+      (json_rpc.Parameters _) => _run((r) => r.retryStart()),
+    );
+    peer.registerMethod(
+      'stop',
+      (json_rpc.Parameters _) => _run((r) => r.stop()),
+    );
     peer.registerMethod(
       'applyMigrations',
-      () => _run((r) => r.applyMigrations()),
+      (json_rpc.Parameters _) => _run((r) => r.applyMigrations()),
     );
 
     peer.registerMethod(
@@ -177,7 +201,7 @@ class RunnerSocketServer {
     );
     peer.registerMethod(
       'restartFlutterApps',
-      () => _run((r) => r.restartFlutterApps()),
+      (json_rpc.Parameters _) => _run((r) => r.restartFlutterApps()),
     );
   }
 

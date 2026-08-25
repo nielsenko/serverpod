@@ -1235,7 +1235,7 @@ Future<bool> _detectExistingInstance(GeneratorConfig config) async {
     case LiveRunner(:final manifest):
       log.info(
         'A serverpod runner for "${config.name}" is already running '
-        '(pid ${manifest.pid}). Attach to it with `serverpod attach`, or '
+        '(pid ${manifest.pid}). Attach to it with `serverpod runner attach`, or '
         'stop it with `serverpod stop`.',
       );
       return true;

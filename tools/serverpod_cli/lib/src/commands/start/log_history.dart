@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -97,6 +98,10 @@ class StartLogHistory {
   ///
   /// The buffers stay readable for a final snapshot.
   Future<void> close() => _events.close();
+
+  /// The retained output of every Flutter app that has produced any, by id.
+  Map<String, List<String>> get flutterLines =>
+      UnmodifiableMapView(_flutterLines);
 
   /// The raw output lines of the Flutter app [appId], oldest first.
   ///
