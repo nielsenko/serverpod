@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:serverpod_cli/src/runner/log_codec.dart';
 import 'package:serverpod_cli/src/runner/runner_client.dart';
 import 'package:serverpod_cli/src/runner/runner_event.dart';
 import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
@@ -84,12 +85,12 @@ String _stageLine(RunnerStage stage) => switch (stage) {
 };
 
 String? _formatEvent(RunnerEvent event) => switch (event) {
-  ServerLogEvent(:final entry) => _formatLogEntry(entry),
+  ServerLogEvent(:final entry) => formatLogEntryLine(entry),
   // The pod's own stdout, already a finished line.
   ServerLineEvent(:final line) => line,
   FlutterLineEvent(:final appId, :final line) => '[$appId] $line',
   FlutterLogEntryEvent(:final appId, :final entry) =>
-    '[$appId] ${_formatLogEntry(entry)}',
+    '[$appId] ${formatLogEntryLine(entry)}',
   OperationStartedEvent(:final operation) => '... ${operation.label}',
   OperationCompletedEvent(:final operation) =>
     '${operation.success ? '✓' : '✗'} ${operation.label} '
@@ -102,18 +103,7 @@ String? _formatEvent(RunnerEvent event) => switch (event) {
 };
 
 String _formatHistoryEntry(Object entry) => switch (entry) {
-  LogEntry() => _formatLogEntry(entry),
+  LogEntry() => formatLogEntryLine(entry),
   _ => entry.toString(),
 };
 
-String _formatLogEntry(LogEntry entry) {
-  final buffer = StringBuffer()
-    ..write(entry.time.toIso8601String())
-    ..write(' [')
-    ..write(entry.level.name.toUpperCase())
-    ..write('] ')
-    ..write(entry.message);
-  if (entry.error != null) buffer.write('\n${entry.error}');
-  if (entry.stackTrace != null) buffer.write('\n${entry.stackTrace}');
-  return buffer.toString();
-}

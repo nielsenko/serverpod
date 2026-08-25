@@ -47,7 +47,7 @@ void main() {
       holder = StartAppStateHolder(state);
       tester = await NoctermTester.create(size: const Size(80, 24));
       await tester.pumpComponent(
-        ServerpodWatchApp(holder: holder, onReady: (_) {}),
+        ServerpodWatchApp(holder: holder),
       );
     });
 

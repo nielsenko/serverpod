@@ -10,6 +10,8 @@ import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/analytics/cli_analytics.dart';
 import 'package:serverpod_cli/src/analytics/session_metrics.dart';
+import 'package:serverpod_cli/src/commands/attach.dart'
+    show attachWithLogStream, attachWithTui, requireAttachSocket;
 import 'package:serverpod_cli/src/commands/generate.dart';
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/serverpod_command.dart';
@@ -22,9 +24,6 @@ import 'package:serverpod_cli/src/commands/start/mcp_socket.dart';
 import 'package:serverpod_cli/src/commands/start/native_assets_builder.dart';
 import 'package:serverpod_cli/src/commands/start/package_dependency_tracker.dart';
 import 'package:serverpod_cli/src/commands/start/server_process.dart';
-import 'package:serverpod_cli/src/commands/start/tui/app.dart';
-import 'package:serverpod_cli/src/commands/start/tui/event_handler.dart';
-import 'package:serverpod_cli/src/commands/start/tui/state.dart';
 import 'package:serverpod_cli/src/commands/start/watch_loop.dart';
 import 'package:serverpod_cli/src/commands/start/watch_session.dart';
 import 'package:serverpod_cli/src/commands/watcher.dart';
@@ -35,8 +34,6 @@ import 'package:serverpod_cli/src/generator/generation_staleness.dart';
 import 'package:serverpod_cli/src/generator/isolated_analyzers.dart';
 import 'package:serverpod_cli/src/migrations/cli_migration_runner.dart';
 import 'package:serverpod_cli/src/runner/local_runner_api.dart';
-import 'package:serverpod_cli/src/runner/migration_result.dart';
-import 'package:serverpod_cli/src/runner/runner_api.dart';
 import 'package:serverpod_cli/src/runner/runner_discovery.dart';
 import 'package:serverpod_cli/src/runner/runner_lock.dart';
 import 'package:serverpod_cli/src/runner/runner_manifest.dart';
@@ -44,13 +41,10 @@ import 'package:serverpod_cli/src/runner/runner_manifest_publisher.dart';
 import 'package:serverpod_cli/src/runner/runner_paths.dart';
 import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
 import 'package:serverpod_cli/src/runner/runner_socket_server.dart';
-import 'package:serverpod_cli/src/util/internal_error.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_cli/src/vm_proxy/proxy.dart';
 import 'package:serverpod_cli/src/vm_proxy/serverpod_hooks.dart';
-import 'package:serverpod_logging_cli/serverpod_logging_cli.dart';
 import 'package:serverpod_shared/serverpod_shared.dart' hide ExitException;
-import 'package:serverpod_tui/serverpod_tui.dart';
 import 'package:stream_transform/stream_transform.dart';
 import 'package:vm_service/vm_service.dart'
     show Event, EventStreams, RPCError, VmService;
@@ -89,11 +83,22 @@ enum StartOption<V> implements OptionDefinition<V> {
           '--no-docker to override the default behavior.',
     ),
   ),
+  attach(
+    FlagOption(
+      argName: 'attach',
+      defaultsTo: true,
+      helpText:
+          'Attach a UI once the stack is up. With --no-attach the runner is '
+          'brought up, its address is printed, and the command returns.',
+    ),
+  ),
   tui(
     FlagOption(
       argName: 'tui',
       defaultsTo: true,
-      helpText: 'Show interactive terminal UI.',
+      helpText:
+          'Show the interactive terminal UI when attaching. Ignored with '
+          '--no-attach, since nothing renders.',
     ),
   ),
   flutter(
@@ -145,127 +150,186 @@ class StartCommand extends ServerpodCommand<StartOption> {
   Future<void> runWithConfig(
     Configuration<StartOption> commandConfig,
   ) async {
-    final watch = commandConfig.value(StartOption.watch);
-    final useTui = commandConfig.value(StartOption.tui) && stdout.hasTerminal;
-    final launchFlutterApp = commandConfig.value(StartOption.flutter);
+    final config = await _loadConfig(commandConfig);
+    final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
+    final asked = RunnerConfig(
+      watch: commandConfig.value(StartOption.watch),
+      flutter: commandConfig.value(StartOption.flutter),
+      serverArgs: argResults?.rest ?? const [],
+    );
 
-    // In TUI mode, start the UI immediately and do all setup in onReady.
-    // This avoids a visible delay from config loading and Docker checks.
-    if (useTui) {
-      // When no `--directory` is given, resolve the server root (including an
-      // interactive multi-project choice) *before* the TUI starts. Otherwise
-      // `findOrPrompt` runs after nocterm has switched the terminal to raw
-      // mode, which breaks the CLI `select` prompt used for that choice.
-      final config = await GeneratorConfig.load(
-        serverRootDir: commandConfig.value(StartOption.directory),
-        interactive: serverpodRunner.globalConfiguration.optionalValue(
-          GlobalOption.interactive,
-        ),
-      );
+    // Idempotent: bring a runner up if there is none, and otherwise go straight
+    // to attaching. A caller need not know whether the stack is already up in
+    // this worktree; the stack is up when this returns zero.
+    final manifest = await _ensureRunner(
+      commandConfig: commandConfig,
+      config: config,
+      serverDir: serverDir,
+      asked: asked,
+      docker: commandConfig.optionalValue(StartOption.docker),
+    );
 
-      // Bail before the TUI takes over the terminal
-      if (await _detectExistingInstance(config)) return;
-
-      // Fire-and-forget: analytics must never delay session start.
-      unawaited(
-        _captureSessionStartAnalytics(
-          config: config,
-          commandConfig: commandConfig,
-          useTui: true,
-          launchFlutterApp: launchFlutterApp,
-        ),
-      );
-
-      final exitCode = await _runWithTui(
-        commandConfig: commandConfig,
-        watch: watch,
-        launchFlutterApp: launchFlutterApp,
-        serverArgs: argResults?.rest ?? [],
-        config: config,
-      );
-      if (exitCode != 0) throw ExitException(exitCode);
+    if (!commandConfig.value(StartOption.attach)) {
+      // The path an agent takes: the address is printed and the command
+      // returns, leaving the runner up.
+      log.info('Runner ready (pid ${manifest.pid}).');
+      log.info('Attach with `serverpod attach`, stop with `serverpod stop`.');
       return;
     }
 
-    final directory = commandConfig.value(StartOption.directory);
+    final socketPath = requireAttachSocket(manifest);
+    final useTui = commandConfig.value(StartOption.tui) && stdout.hasTerminal;
+    final exitCode = useTui
+        ? await attachWithTui(socketPath)
+        : await attachWithLogStream(socketPath);
+    if (exitCode != 0) throw ExitException(exitCode);
+  }
 
-    // Get interactive flag from global configuration.
-    final interactive = serverpodRunner.globalConfiguration.optionalValue(
-      GlobalOption.interactive,
-    );
-
-    // Load generator config (also resolves server directory).
-    late final GeneratorConfig config;
+  Future<GeneratorConfig> _loadConfig(
+    Configuration<StartOption> commandConfig,
+  ) async {
     try {
+      late final GeneratorConfig config;
       await log.progress('Loading project configuration', () async {
         config = await GeneratorConfig.load(
-          serverRootDir: directory,
-          interactive: interactive,
+          serverRootDir: commandConfig.value(StartOption.directory),
+          interactive: serverpodRunner.globalConfiguration.optionalValue(
+            GlobalOption.interactive,
+          ),
         );
         return true;
       });
+      return config;
     } catch (e) {
       log.error('$e');
       throw ExitException(ServerpodCommand.commandInvokedCannotExecute);
     }
+  }
 
-    if (await _detectExistingInstance(config)) return;
+  /// Returns the manifest of a runner serving [serverDir], starting one if
+  /// there is none.
+  ///
+  /// Fails rather than attaching when a live runner disagrees with what this
+  /// invocation asked for. Attaching anyway with a warning would leave a caller
+  /// that reads only the exit status believing it got what it asked for.
+  Future<RunnerManifest> _ensureRunner({
+    required Configuration<StartOption> commandConfig,
+    required GeneratorConfig config,
+    required String serverDir,
+    required RunnerConfig asked,
+    required bool? docker,
+  }) async {
+    switch (await resolveRunner(serverDir)) {
+      case IncompatibleRunner(:final message):
+        log.error(message);
+        throw ExitException.error();
 
-    // Fire-and-forget: analytics must never delay session start.
+      case LiveRunner(:final manifest, :final versionWarning):
+        if (versionWarning != null) log.warning(versionWarning);
+        final differences = manifest.config.differencesFrom(asked);
+        if (differences.isNotEmpty) {
+          log.error(
+            'A serverpod runner is already running for "${config.name}", '
+            'started with different options: ${differences.join(', ')}. '
+            'Stop it with `serverpod stop` and start it again to change them.',
+          );
+          throw ExitException.error();
+        }
+        return manifest;
+
+      case NoRunner():
+        return _spawnRunner(
+          commandConfig: commandConfig,
+          config: config,
+          serverDir: serverDir,
+          asked: asked,
+          docker: docker,
+        );
+    }
+  }
+
+  /// Spawns the runner detached and waits for it to publish its manifest.
+  ///
+  /// Detached, because the operating system delivers SIGINT to a whole process
+  /// group: a runner spawned in this terminal's group would die on the next
+  /// Ctrl+C in it. [ProcessStartMode.detached] puts it in a group of its own.
+  Future<RunnerManifest> _spawnRunner({
+    required Configuration<StartOption> commandConfig,
+    required GeneratorConfig config,
+    required String serverDir,
+    required RunnerConfig asked,
+    required bool? docker,
+  }) async {
+    // Fire-and-forget: analytics must never delay session start. Captured here
+    // rather than in the runner so a stack is counted once however many clients
+    // later attach to it.
     unawaited(
       _captureSessionStartAnalytics(
         config: config,
         commandConfig: commandConfig,
-        useTui: false,
-        launchFlutterApp: launchFlutterApp,
+        useTui: commandConfig.value(StartOption.tui),
+        launchFlutterApp: asked.flutter,
       ),
     );
 
-    final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
-    final docker = commandConfig.optionalValue(StartOption.docker);
+    final process = await Process.start(
+      Platform.resolvedExecutable,
+      [
+        // Re-invoke this same CLI. Run from source or from a pub-global
+        // snapshot the executable is the Dart VM and the script has to be
+        // passed; compiled to an executable it is the CLI itself, where
+        // passing a script would make it the runner's first argument.
+        if (_runsOnDartVm) Platform.script.toFilePath(),
+        'runner',
+        // No stdio to inherit once detached, so the runner writes its own log.
+        '--detached',
+        '--directory',
+        serverDir,
+        if (asked.watch) '--watch' else '--no-watch',
+        if (asked.flutter) '--flutter' else '--no-flutter',
+        if (docker == true) '--docker',
+        if (docker == false) '--no-docker',
+        if (asked.serverArgs.isNotEmpty) ...['--', ...asked.serverArgs],
+      ],
+      mode: ProcessStartMode.detached,
+    );
 
-    // Listen for termination signals before starting any services so that
-    // a SIGINT at any point triggers graceful shutdown (including Docker
-    // cleanup) rather than killing the process.
-    final shutdown = _ShutdownSignal();
+    final manifest = await _awaitManifest(serverDir);
+    if (manifest != null) return manifest;
 
-    try {
-      // Extract passthrough args (everything after '--'). _setupWatchLoop
-      // mutates the ref's value if the in-process migration apply has
-      // to defer to the pod's `--apply-migrations`.
-      final serverArgs = ServerArgsRef(argResults?.rest ?? []);
+    log.error(
+      'The runner (pid ${process.pid}) did not come up in time. '
+      'Its output, including why it stopped if it did, is in '
+      '${serverpodRunnerLogPath(serverDir)}.',
+    );
+    throw ExitException.error();
+  }
 
-      final result = await _setupWatchLoop(
-        config: config,
-        serverDir: serverDir,
-        serverArgs: serverArgs,
-        watch: watch,
-        docker: docker,
-        // No TUI here, so the only recovery from a broken project is the file
-        // watcher (watch mode). Without it there is nothing to wait for.
-        keepOpenOnFailure: watch,
-        launchFlutterApp: launchFlutterApp,
-        shutdown: shutdown,
-        // Nothing renders the history here; it is kept solely so the MCP log
-        // tools work the same as they do under the TUI, which also leaves the
-        // terminal free for the Flutter output.
-        logHistory: StartLogHistory(),
-        echoFlutterOutput: true,
-      );
-      switch (result) {
-        case WatchLoopAborted(:final exitCode):
-          if (exitCode != 0) throw ExitException(exitCode);
-          return;
-        case WatchLoopReady(:final ctx):
-          if (ctx.session.isRunning) log.info(serverRunning);
-          final exitCode = await shutdown.future;
-          log.info('Server stopped (exitCode: $exitCode).');
-          await ctx.dispose();
-          if (exitCode != 0) throw ExitException(exitCode);
+  /// Whether this process is the Dart VM running a script, rather than a
+  /// compiled executable of the CLI itself.
+  static bool get _runsOnDartVm =>
+      p.basenameWithoutExtension(Platform.resolvedExecutable) == 'dart';
+
+  /// Waits for the spawned runner to publish a manifest and answer on its
+  /// socket, or gives up.
+  ///
+  /// The runner publishes only once the whole stack is up, so the wait has to
+  /// cover code generation, a Docker Compose start and a cold compile. It also
+  /// covers a runner that aborted before publishing - a held port, a held
+  /// lock, a Docker failure - and there is no sign of that until the deadline
+  /// passes, so the deadline stays as short as a legitimate cold start allows.
+  Future<RunnerManifest?> _awaitManifest(
+    String serverDir, {
+    Duration timeout = const Duration(minutes: 2),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (await resolveRunner(serverDir) case LiveRunner(:final manifest)) {
+        return manifest;
       }
-    } finally {
-      shutdown.dispose();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
     }
+    return null;
   }
 }
 
@@ -485,7 +549,13 @@ Future<void> _applyMigrationsForSession({
   }
 }
 
-Future<WatchLoopSetupResult> _setupWatchLoop({
+/// Brings the development stack up and returns the context that owns it.
+///
+/// Called only by the runner process: nothing renders here, and what a client
+/// sees it gets from [RunnerApi]'s snapshot and events. The one thing that
+/// still differs between invocations - where raw output is echoed, a terminal
+/// in a foreground run and the log file when detached - is a parameter.
+Future<WatchLoopSetupResult> setupWatchLoop({
   required GeneratorConfig config,
   required String serverDir,
   required ServerArgsRef serverArgs,
@@ -497,24 +567,19 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
   // `false`, there is no way to recover (non-TUI `--no-watch`), so fail fast.
   required bool keepOpenOnFailure,
   required bool launchFlutterApp,
-  required _ShutdownSignal shutdown,
+  required ShutdownSignal shutdown,
   // Session-wide log retention. Filled here rather than by the presentation
   // layer, so the MCP log tools serve the same content with and without the
   // TUI. See [StartLogHistory].
   required StartLogHistory logHistory,
-  // Whether raw Flutter output is also written to this process's
-  // stdout/stderr. False under the TUI, which owns the terminal and renders
-  // the recorded lines itself.
-  required bool echoFlutterOutput,
+  // Where raw Flutter output is echoed in addition to being recorded: the
+  // terminal in a foreground session, the runner's log file when detached, and
+  // null under the TUI, which owns the terminal and renders the recorded lines
+  // itself.
+  IOSink? flutterStdoutEcho,
+  IOSink? flutterStderrEcho,
   IOSink? serverStdoutSink,
   IOSink? serverStderrSink,
-  void Function(FlutterAppConfig app)? onEnsureFlutterAppTab,
-  void Function(FlutterAppConfig app, String stage)? onFlutterProgress,
-  void Function(FlutterAppConfig app, String? url)? onFlutterReady,
-  void Function(FlutterAppConfig app)? onFlutterLaunchFailed,
-  void Function(FlutterAppConfig app)? onFlutterStop,
-  Future<void> Function(ServerProcess server)? onServerStart,
-  void Function(List<FlutterAppConfig>)? onFlutterAppsLoaded,
 }) async {
   log.info(watch ? 'Starting server in watch mode...' : 'Starting server...');
 
@@ -579,6 +644,12 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     await stopDockerIfStarted();
     await lock.release();
   }
+
+  // What the caller actually asked for, captured before the migration hook
+  // rewrites it. The manifest publishes this rather than the mutated list, so
+  // an identical second `start` compares like with like instead of disagreeing
+  // with itself over an argument the runner added.
+  final requestedServerArgs = [...serverArgs.value];
 
   // Apply pending migrations from the CLI before booting the pod.
   try {
@@ -743,44 +814,31 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
   final flutterManager = FlutterAppManager(
     runMode: runMode,
     projectName: config.name,
-    // Whether to auto-launch every app flagged with `auto_launch`
-    // (the synthesized default sibling app is flagged, preserving
-    // the historical single-app behavior). When no app opts in, none
-    // launch - the user starts them with Ctrl+R.
-    launchFlutterApp: launchFlutterApp,
+    // Auto-launch is armed when a UI first attaches, not now: a stack an
+    // agent started with no UI should not spawn Flutter processes nobody is
+    // watching, and `--flutter` must not mean different things depending on
+    // which invocation spawned the runner.
+    launchFlutterApp: false,
     serverpodToolDir: serverpodToolDir,
     serverPubspecFile: serverPubspecFile,
     serverPackageDirectoryPathParts: config.serverPackageDirectoryPathParts,
-    onProgress: (app, stage) => onFlutterProgress?.call(app, stage),
-    onReady: (app, url) {
-      runnerEvents?.recordFlutterAppState(app.id, running: true, url: url);
-      onFlutterReady?.call(app, url);
-    },
+    onReady: (app, url) =>
+        runnerEvents?.recordFlutterAppState(app.id, running: true, url: url),
     onStart: (app, process) => _recordExtensionEvents(
       process.vmService,
       (event) => logHistory.recordFlutterExtensionEvent(app.id, event),
     ),
-    onStop: (app) {
-      runnerEvents?.recordFlutterAppState(app.id, running: false);
-      onFlutterStop?.call(app);
-    },
-    onLaunchFailed: (app) {
-      runnerEvents?.recordFlutterAppState(app.id, running: false);
-      onFlutterLaunchFailed?.call(app);
-    },
-    onEnsureAppTab: (app) => onEnsureFlutterAppTab?.call(app),
+    onStop: (app) =>
+        runnerEvents?.recordFlutterAppState(app.id, running: false),
+    onLaunchFailed: (app) =>
+        runnerEvents?.recordFlutterAppState(app.id, running: false),
     onLog: (app, event) => logHistory.recordFlutterLogEvent(app.id, event),
-    stdoutSinkFor: (app) => logHistory.flutterOutputSink(
-      app.id,
-      forwardTo: echoFlutterOutput ? stdout : null,
-    ),
-    stderrSinkFor: (app) => logHistory.flutterOutputSink(
-      app.id,
-      forwardTo: echoFlutterOutput ? stderr : null,
-    ),
+    stdoutSinkFor: (app) =>
+        logHistory.flutterOutputSink(app.id, forwardTo: flutterStdoutEcho),
+    stderrSinkFor: (app) =>
+        logHistory.flutterOutputSink(app.id, forwardTo: flutterStderrEcho),
   );
   await flutterManager.initialize();
-  onFlutterAppsLoaded?.call(flutterManager.apps.toList());
   // No runner event here: nothing has attached this early, and the snapshot a
   // client gets on connect carries the app list.
 
@@ -808,7 +866,6 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     // Fires on the initial boot, on every restart, and on the first boot after
     // recovering from a degraded start.
     runnerEvents?.setStage(RunnerStage.running);
-    if (onServerStart != null) await onServerStart(serverProcess);
     proxy = await _mountOrRetargetProxy(
       serverProcess: serverProcess,
       existing: proxy,
@@ -910,7 +967,6 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     flutterManager: flutterManager,
     flutterAppsLoader: () async {
       await flutterManager.loadApps();
-      onFlutterAppsLoaded?.call(flutterManager.apps.toList());
       runnerEvents?.recordFlutterApps(flutterManager.apps.toList());
       setupFileWatcher();
     },
@@ -963,6 +1019,13 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
   try {
     await attachSocket.start();
     attachSocket.connect(runnerApi);
+    if (launchFlutterApp) {
+      attachSocket.onFirstClientAttached = () => unawaited(
+        // Serialized behind any in-flight reload or restart, like every other
+        // launch.
+        session.launchAutoLaunchApps(),
+      );
+    }
   } on SocketException catch (e) {
     log.warning('Failed to start the attach server: $e');
     attachSocket = null;
@@ -993,7 +1056,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
         watch: watch,
         flutter: launchFlutterApp,
         docker: startDocker,
-        serverArgs: serverArgs.value,
+        serverArgs: requestedServerArgs,
       ),
     ),
   );
@@ -1197,12 +1260,17 @@ Future<VmServiceProxy?> _mountOrRetargetProxy({
 /// pressed) so the wait-for-exit point only ever has to await [future].
 ///
 /// Call [dispose] to cancel the signal subscriptions, if any.
-class _ShutdownSignal {
+/// The single point every termination trigger funnels through.
+///
+/// In the runner, SIGINT and SIGTERM mean a graceful shutdown. In an attached
+/// client, SIGINT only detaches - it cannot reach the runner, which is in a
+/// process group of its own.
+class ShutdownSignal {
   final Completer<int> _completer = Completer<int>();
   StreamSubscription<void>? _sigintSub;
   StreamSubscription<void>? _sigtermSub;
 
-  _ShutdownSignal({bool listenForSignals = true}) {
+  ShutdownSignal({bool listenForSignals = true}) {
     if (!listenForSignals) return;
     _sigintSub = ProcessSignal.sigint.watch().listen(_completeFromSignal);
     if (!Platform.isWindows) {
@@ -1232,33 +1300,6 @@ class _ShutdownSignal {
   }
 }
 
-/// Cheap pre-flight check for a runner already serving [config]'s project,
-/// by resolving its manifest and probing the socket that names.
-///
-/// Logs a message and returns `true` when one is live, so callers can bail
-/// before any further setup - in particular before the TUI takes over the
-/// terminal, where the message would otherwise be invisible.
-///
-/// A crashed runner leaves its manifest behind, so a manifest whose socket
-/// refuses the connection counts as no runner and is replaced.
-Future<bool> _detectExistingInstance(GeneratorConfig config) async {
-  final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
-  switch (await resolveRunner(serverDir)) {
-    case NoRunner():
-      return false;
-    case IncompatibleRunner(:final message):
-      log.error(message);
-      return true;
-    case LiveRunner(:final manifest):
-      log.info(
-        'A serverpod runner for "${config.name}" is already running '
-        '(pid ${manifest.pid}). Attach to it with `serverpod attach`, or '
-        'stop it with `serverpod stop`.',
-      );
-      return true;
-  }
-}
-
 /// Checks if a server is already running by reading the VM service info file
 /// and attempting to connect. Returns the URI if reachable, `null` otherwise.
 /// Cleans up stale files.
@@ -1283,401 +1324,5 @@ Future<String?> _checkExistingServer(String infoPath) async {
     // Stale or unreachable - clean up and proceed with normal startup.
     await file.deleteIfExists();
     return null;
-  }
-}
-
-/// Runs the server with the nocterm TUI.
-///
-/// The TUI takes over the terminal via [nocterm.runApp], which blocks the main
-/// isolate. Backend work starts via the [ServerpodWatchApp.onReady] callback,
-/// which fires after the first frame via [addPostFrameCallback], ensuring the
-/// component tree is fully mounted before any [setState] calls.
-Future<int> _runWithTui({
-  required Configuration<StartOption> commandConfig,
-  required bool watch,
-  required bool launchFlutterApp,
-  required List<String> serverArgs,
-  required GeneratorConfig config,
-}) async {
-  final holder = StartAppStateHolder(
-    ServerWatchState()..watchModeEnabled = watch,
-  );
-  // The watch loop fills the history; from here on the TUI renders it.
-  holder.state.history.attachHolder(holder);
-  var backendStarted = false;
-
-  // Shared shutdown signal
-  final shutdown = _ShutdownSignal(listenForSignals: false);
-
-  // Captured on a fatal crash so it can be replayed to the real terminal in
-  // [preExit] when the user quits. The crash is also shown inside the TUI, but
-  // that copy lives in an in-memory log history that is discarded once we leave
-  // the alternate screen - so without this capture it would never reach the
-  // user's scrollback. First crash wins.
-  ({Object error, StackTrace stackTrace})? fatalCrash;
-  void recordFatalCrash(Object error, StackTrace stackTrace) {
-    fatalCrash ??= (error: error, stackTrace: stackTrace);
-  }
-
-  // Captured so the renderer tear-down listener can wait for the
-  // backend's cleanup (ctx.dispose) to finish before calling
-  // shutdownTuiApp. Default to a no-op so the listener is safe to invoke
-  // even if SIGINT arrives before onReady fires.
-  Future<void> backendFuture = Future.value();
-
-  void onReady(StartAppStateHolder h) {
-    if (backendStarted) return;
-    backendStarted = true;
-
-    backendFuture = _runTuiBackend(
-      holder: h,
-      commandConfig: commandConfig,
-      watch: watch,
-      launchFlutterApp: launchFlutterApp,
-      serverArgs: serverArgs,
-      config: config,
-      shutdown: shutdown,
-      onFatalError: recordFatalCrash,
-    ).catchError((Object e, StackTrace st) => recordFatalCrash(e, st));
-  }
-
-  // Runs after the TUI tears down (alternate screen restored) but before the
-  // process exits. Replays any captured crash and server process errors
-  // so they survive in the user's scrollback - mirrors how `serverpod create`
-  // flushes its errors to the terminal on exit.
-  Future<void> preExit(int exitCode) async {
-    var shouldFlushLogs = false;
-
-    final crash = fatalCrash;
-    if (crash != null) {
-      printInternalError(crash.error, crash.stackTrace);
-      shouldFlushLogs = true;
-    }
-
-    if (exitCode != 0 && _serverProcessErrorBuffer.isNotEmpty) {
-      log.error(_serverProcessErrorBuffer.toString());
-      shouldFlushLogs = true;
-    }
-
-    if (shouldFlushLogs) await log.flush();
-  }
-
-  // Wait for the backend's dispose to finish before calling shutdownTuiApp
-  unawaited(
-    shutdown.future.then((code) async {
-      await backendFuture;
-      // Swap the TUI-backed logger (whose output went to the now-gone alternate
-      // screen) for a fresh stdout-backed one, so the replayed errors actually
-      // reach the terminal.
-      await closeLogger();
-      initializeLogger();
-      shutdownTuiApp(code);
-    }),
-  );
-
-  await runTuiApp(
-    ServerpodWatchApp(holder: holder, onReady: onReady),
-    backend: ServerpodTerminalBackend(preExit: preExit),
-    onShutdownSignal: () => shutdown.complete(0),
-  );
-
-  // runServerpodApp returned, so shutdownServerpodApp ran, so the listener fired,
-  // so shutdown.future is completed.
-  return shutdown.future;
-}
-
-/// Buffer for errors from [ServerProcess] stderr
-/// which will be flushed to the terminal if the TUI
-/// exits with a non-zero exit code.
-final _serverProcessErrorBuffer = StringBuffer();
-
-/// Backend logic that runs after the TUI is mounted and ready.
-Future<void> _runTuiBackend({
-  required StartAppStateHolder holder,
-  required Configuration<StartOption> commandConfig,
-  required bool watch,
-  required bool launchFlutterApp,
-  required List<String> serverArgs,
-  required GeneratorConfig config,
-  required _ShutdownSignal shutdown,
-  required void Function(Object error, StackTrace stackTrace) onFatalError,
-}) async {
-  try {
-    // Replace the CLI logger with a TUI-backed logger.
-    final tuiWriter = TuiLogWriter();
-    initializeLoggerWith(ServerpodCliLogger(tuiWriter));
-    tuiWriter.attach(holder);
-
-    final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
-    final docker = commandConfig.optionalValue(StartOption.docker);
-
-    final argsRef = ServerArgsRef(serverArgs);
-
-    final stdoutSink = TuiLogSink(holder, addLine: holder.state.rawLines.add);
-    final stderrSink = TuiLogSink(
-      holder,
-      addLine: (line) {
-        _serverProcessErrorBuffer.writeln(line);
-        holder.state.rawLines.add(line);
-      },
-    );
-
-    final result = await _setupWatchLoop(
-      config: config,
-      serverDir: serverDir,
-      serverArgs: argsRef,
-      watch: watch,
-      docker: docker,
-      // The TUI always stays open on a broken project: in watch mode the file
-      // watcher auto-recovers; otherwise the user triggers a rebuild manually.
-      keepOpenOnFailure: true,
-      launchFlutterApp: launchFlutterApp,
-      shutdown: shutdown,
-      logHistory: holder.state.history,
-      // The TUI owns the terminal, so Flutter output is only recorded.
-      echoFlutterOutput: false,
-      serverStdoutSink: stdoutSink,
-      serverStderrSink: stderrSink,
-      onEnsureFlutterAppTab: (app) {
-        final tab = holder.state.getOrCreateAppLogTab(
-          appId: app.id,
-          label: app.name,
-        );
-        tab.ready = false;
-        tab.stopped = false;
-        tab.url = null;
-        // Refreshed per launch; the configured device may have changed.
-        tab.device = app.device;
-        // Focus the tab only when the launch was initiated from the launch
-        // panel (which is open at that point). Apps auto-started by
-        // `serverpod start` launch with the panel closed, so the Server logs
-        // tab stays active for them.
-        if (holder.state.showLaunchPanel) {
-          holder.state.tabs.focusTab(tab);
-        }
-        holder.markDirty();
-      },
-      onFlutterProgress: (app, stage) {
-        final tab = holder.state.appLogTabFor(app.id);
-        if (tab != null) {
-          tab.startupStage = stage;
-          holder.markDirty();
-        }
-      },
-      onFlutterReady: (app, url) {
-        final tab = holder.state.appLogTabFor(app.id);
-        if (tab != null) {
-          // Null on non-web devices, which publish no URL; the status line
-          // then falls back to its generic running label.
-          tab.url = url;
-          tab.ready = true;
-          tab.stopped = false;
-          holder.markDirty();
-        }
-      },
-      onFlutterLaunchFailed: (app) {
-        final tab = holder.state.appLogTabFor(app.id);
-        if (tab != null) {
-          tab.ready = false;
-          tab.stopped = true;
-          tab.url = null;
-          holder.markDirty();
-        }
-      },
-      onServerStart: (server) async {
-        // Fires on every server boot - the initial start, a restart, and the
-        // first boot after recovering from a degraded start. Mark the UI ready
-        // so a degraded->running transition lights up the action buttons.
-        holder.state.serverReady = true;
-        holder.state.serverStartable = false;
-        holder.markDirty();
-      },
-      onFlutterStop: (app) {
-        final tab = holder.state.appLogTabFor(app.id);
-        if (tab != null) {
-          tab.ready = false;
-          tab.stopped = true;
-          holder.markDirty();
-        }
-      },
-      onFlutterAppsLoaded: (newApps) {
-        // Remove tabs for gone apps and update state.
-        final oldApps = holder.state.launchableApps;
-        for (final app in oldApps) {
-          late final tab = holder.state.appLogTabFor(app.id);
-          if (!newApps.any((a) => a.id == app.id) && tab != null) {
-            holder.state.tabs.removeTab(tab);
-          }
-        }
-        holder.state.createAppsTabAreaIfNeeded();
-        holder.state.launchableApps = newApps;
-        holder.state.canLaunchApps =
-            newApps.isNotEmpty &&
-            runModeFromServerArgs(serverArgs) == 'development';
-        holder.markDirty();
-      },
-    );
-
-    switch (result) {
-      case WatchLoopAborted(:final exitCode):
-        shutdown.complete(exitCode);
-        return;
-      case WatchLoopReady(:final ctx):
-        final runner = ctx.runnerApi;
-        // Offer Ctrl+R whenever a Flutter app could run here - even after a
-        // `--no-flutter` start, where it acts as a "launch the app" button.
-        final apps = runner.flutterApps;
-        holder.state.canLaunchApps =
-            apps.isNotEmpty &&
-            runModeFromServerArgs(serverArgs) == 'development';
-        holder.state.launchableApps = apps;
-        holder.state.isAppRunning = runner.isFlutterAppRunning;
-        holder.state.isAppLaunching = runner.isFlutterAppLaunching;
-        // The launch panel addresses apps by row; the runner only knows ids, so
-        // the index is resolved here.
-        FlutterAppConfig? appAt(int index) {
-          final flutterApps = runner.flutterApps;
-          if (index < 0 || index >= flutterApps.length) return null;
-          return flutterApps[index];
-        }
-
-        holder.onLaunchApp = (index) {
-          final app = appAt(index);
-          if (app == null) return;
-          // Selecting an already-running app relaunches it; a stopped one is
-          // launched. Either path focuses the app's tab via onEnsureAppTab.
-          final isRunning = runner.isFlutterAppRunning(app.id);
-          runTrackedAction(
-            holder,
-            isRunning ? 'Relaunch ${app.name}' : 'Launch ${app.name}',
-            () => runner.restartFlutterApp(app.id),
-          );
-        };
-        holder.onStopApp = (index) {
-          final app = appAt(index);
-          if (app == null || !runner.isFlutterAppRunning(app.id)) return;
-          runTrackedAction(
-            holder,
-            'Stop ${app.name}',
-            () => runner.stopFlutterApp(app.id),
-          );
-        };
-        holder.onQuit = runner.stop;
-        holder.onHotReload = () {
-          runTrackedAction(holder, 'Hot reload', runner.hotReload);
-        };
-        holder.onHotRestart = () {
-          // While degraded (no server yet), the R action rebuilds and boots the
-          // server via retryStart; once running it is an ordinary hot restart.
-          final running = runner.isRunning;
-          runTrackedAction(
-            holder,
-            running ? 'Hot restart' : 'Rebuild & start',
-            running ? runner.hotRestart : runner.retryStart,
-            allowWhenStartable: !running,
-          );
-        };
-        holder.onRestartFlutterApp = () {
-          runTrackedAction(
-            holder,
-            runner.isAnyFlutterAppRunning
-                ? 'Restart Flutter app'
-                : 'Start Flutter app',
-            // Routed through the session so the relaunch is serialized behind
-            // any in-flight reload/restart and guarded against re-spawning
-            // during shutdown.
-            runner.restartFlutterApps,
-          );
-        };
-        holder.onCreateMigration = ({bool force = false}) {
-          runTrackedAction(
-            holder,
-            force ? 'Force-creating migration' : 'Creating migration',
-            () => _createMigrationForTui(
-              runner,
-              () => runner.createMigration(force: force),
-              forceHint: 'Use ⇧+M to force-create it anyway.',
-            ),
-          );
-        };
-        holder.onCreateRepairMigration = ({bool force = false}) {
-          runTrackedAction(
-            holder,
-            force
-                ? 'Force-creating repair migration'
-                : 'Creating repair migration',
-            () => _createMigrationForTui(
-              runner,
-              () => runner.createRepairMigration(force: force),
-              forceHint: 'Use ⇧+P to force-create it anyway.',
-            ),
-          );
-        };
-        holder.onApplyMigration = () {
-          runTrackedAction(
-            holder,
-            'Applying migrations',
-            runner.applyMigrations,
-          );
-        };
-        holder.state.serverReady = runner.isRunning;
-        // Degraded start (no server yet): expose the manual "Start server"
-        // recovery action. The watcher also auto-recovers in watch mode.
-        holder.state.serverStartable = !runner.isRunning;
-        holder.markDirty();
-
-        if (runner.isRunning) log.info(serverRunning);
-
-        // All termination triggers (Quit, SIGINT/SIGTERM, server crash,
-        // unhandled errors) funnel through `shutdown`
-        final exitCode = await shutdown.future;
-        holder.state.serverReady = false;
-        holder.markDirty();
-        log.info('Server stopped (exitCode: $exitCode).');
-
-        await ctx.dispose();
-    }
-  } catch (e, st) {
-    // Surface the crash in the TUI (left open so it stays visible alongside the
-    // preceding logs), and capture it via [onFatalError] so it is also replayed
-    // to the terminal in [_runWithTui] when the user quits - the in-TUI copy is
-    // lost when we leave the alternate screen.
-    holder.state.showSplash = false;
-    log.error('$e', stackTrace: st);
-    onFatalError(e, st);
-  }
-}
-
-/// Runs one of [runner]'s migration commands for a TUI button.
-///
-/// Logs the outcome and, when the command failed, throws so [runTrackedAction]
-/// marks the operation red. [forceHint] is the key binding that retries past
-/// warnings, appended only when the command actually stopped for want of
-/// `force` - [MigrationResult] carries no hint of its own, since the terminal
-/// UI words it as a key binding and MCP as a tool argument.
-///
-/// A successful create is followed by an apply, whose failure is reported
-/// without disturbing the tracked status of the create that did succeed.
-Future<void> _createMigrationForTui(
-  RunnerApi runner,
-  Future<MigrationResult> Function() create, {
-  required String forceHint,
-}) async {
-  final result = await create();
-
-  if (result.isError) {
-    final hint = result.abortedForWarnings ? ' $forceHint' : '';
-    throw Exception('${result.message}$hint');
-  }
-  log.info(result.message);
-
-  try {
-    await runner.applyMigrations();
-  } catch (error, stackTrace) {
-    log.error(
-      'Failed to apply migration: $error.',
-      stackTrace: stackTrace,
-    );
-    log.info('Press A to retry apply migration');
   }
 }

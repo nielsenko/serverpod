@@ -13,8 +13,8 @@ import 'package:package_config/package_config.dart' as pc;
 import 'package:path/path.dart' as p;
 import 'package:pub_semver/pub_semver.dart';
 import 'package:serverpod_cli/src/commands/messages.dart';
+import 'package:serverpod_cli/src/commands/runner.dart';
 import 'package:serverpod_cli/src/commands/serverpod_command_runner.dart';
-import 'package:serverpod_cli/src/commands/start.dart';
 import 'package:serverpod_cli/src/mcp/socket_directory.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_shared/serverpod_shared.dart'
@@ -46,7 +46,7 @@ database:
     });
 
     test(
-      'when serverpod start runs without a Docker flag, '
+      'when serverpod runner runs without a Docker flag, '
       'then Docker services startup is skipped.',
       () async {
         await _createComposeFile(serverDirectory);
@@ -61,7 +61,7 @@ database:
     );
 
     test(
-      'when serverpod start runs with --docker, '
+      'when serverpod runner runs with --docker, '
       'then Docker services startup is requested.',
       () async {
         await _runStart(
@@ -93,7 +93,7 @@ redis:
       });
 
       test(
-        'when serverpod start runs without a Docker flag, '
+        'when serverpod runner runs without a Docker flag, '
         'then Docker services startup is skipped.',
         () async {
           await _createComposeFile(serverDirectory);
@@ -128,7 +128,7 @@ database:
       });
 
       test(
-        'when serverpod start runs without a Docker flag, '
+        'when serverpod runner runs without a Docker flag, '
         'then Docker services startup is skipped.',
         () async {
           await _createComposeFile(serverDirectory);
@@ -143,7 +143,7 @@ database:
       );
 
       test(
-        'when serverpod start runs with --docker, '
+        'when serverpod runner runs with --docker, '
         'then Docker services startup is requested.',
         () async {
           await _runStart(
@@ -178,7 +178,7 @@ database:
       });
 
       test(
-        'when serverpod start runs without a Docker flag, '
+        'when serverpod runner runs without a Docker flag, '
         'then Docker services startup is requested.',
         () async {
           await _createComposeFile(serverDirectory);
@@ -193,7 +193,7 @@ database:
       );
 
       test(
-        'when serverpod start runs without a Docker flag and the project has no Docker Compose file, '
+        'when serverpod runner runs without a Docker flag and the project has no Docker Compose file, '
         'then Docker services startup is skipped.',
         () async {
           await _runStart(serverDirectory: serverDirectory);
@@ -207,7 +207,7 @@ database:
       );
 
       test(
-        'when serverpod start runs with --no-docker, '
+        'when serverpod runner runs with --no-docker, '
         'then Docker services startup is skipped.',
         () async {
           await _createComposeFile(serverDirectory);
@@ -244,7 +244,7 @@ database:
       });
 
       test(
-        'when serverpod start runs without a Docker flag, '
+        'when serverpod runner runs without a Docker flag, '
         'then Docker services startup is requested.',
         () async {
           await _createComposeFile(serverDirectory);
@@ -278,7 +278,7 @@ database:
       });
 
       test(
-        'when serverpod start runs without a Docker flag, '
+        'when serverpod runner runs without a Docker flag, '
         'then Docker services startup is skipped.',
         () async {
           await _createComposeFile(serverDirectory);
@@ -293,7 +293,7 @@ database:
       );
 
       test(
-        'when serverpod start runs with --docker, '
+        'when serverpod runner runs with --docker, '
         'then Docker services startup is requested.',
         () async {
           await _runStart(
@@ -323,7 +323,7 @@ database:
     });
 
     test(
-      'when serverpod start runs with --docker, '
+      'when serverpod runner runs with --docker, '
       'then startup fails with instructions for restoring Docker configuration.',
       () async {
         await _runStart(
@@ -364,7 +364,7 @@ database:
       });
 
       test(
-        'when serverpod start runs without a Docker flag, '
+        'when serverpod runner runs without a Docker flag, '
         'then startup fails with instructions for installing Docker.',
         () async {
           final result = await _runStartInSubprocess(
@@ -413,7 +413,7 @@ database:
       });
 
       test(
-        'when serverpod start runs with --docker, '
+        'when serverpod runner runs with --docker, '
         'then startup fails with instructions for starting Docker.',
         () async {
           final result = await _runStartInSubprocess(
@@ -461,7 +461,7 @@ database:
       });
 
       test(
-        'when serverpod start runs with --docker, '
+        'when serverpod runner runs with --docker, '
         'then startup fails with the Docker Compose output.',
         () async {
           final result = await _runStartInSubprocess(
@@ -502,10 +502,9 @@ database:
           [
             dillPath,
             '--no-interactive',
-            'start',
+            'runner',
             '--directory',
             serverDirectory.path,
-            '--no-tui',
             '--no-watch',
             '--no-flutter',
             '--no-docker',
@@ -519,7 +518,7 @@ database:
             .transform(utf8.decoder)
             .listen(output.write, onError: output.write);
 
-        addTearDown(() => _terminateStartProcessTree(process));
+        addTearDown(() => _terminateRunnerProcessTree(process));
 
         final socket = await _connectToStartedMcpSocket(
           serverDirectory: serverDirectory,
@@ -578,6 +577,12 @@ database:
   );
 }
 
+/// Runs the headless stack the way `serverpod start` spawns it.
+///
+/// The stack - Docker provisioning included - lives in the runner; `start`
+/// only decides whether to spawn one and then attaches. Driving the runner
+/// directly is what exercises the provisioning these tests assert on, without
+/// detaching a process the test would then have to hunt down.
 Future<void> _runStart({
   required Directory serverDirectory,
   String? dockerArgument,
@@ -588,11 +593,11 @@ Future<void> _runStart({
     productionMode: false,
     cliVersion: Version(1, 0, 0),
     onBeforeRunCommand: (_) async {},
-  )..addCommand(StartCommand());
+  )..addCommand(RunnerCommand());
 
   final arguments = [
     '--no-interactive',
-    'start',
+    'runner',
     '--directory',
     serverDirectory.path,
     '--no-watch',
@@ -602,7 +607,7 @@ Future<void> _runStart({
 
   try {
     await runner.run(arguments);
-    fail('serverpod start should have aborted during startup.');
+    fail('serverpod runner should have aborted during startup.');
   } on ExitException catch (exception) {
     // Startup aborts with exit code 1 either at the Docker step or, when
     // Docker is skipped or succeeds, at the intentionally invalid model.
@@ -787,7 +792,7 @@ Future<Socket> _connectToStartedMcpSocket({
   while (DateTime.now().isBefore(deadline)) {
     if (processExitCode != null) {
       throw StateError(
-        'serverpod start exited with $processExitCode before opening its MCP '
+        'serverpod runner exited with $processExitCode before opening its MCP '
         'socket.\n$output',
       );
     }
@@ -801,7 +806,7 @@ Future<Socket> _connectToStartedMcpSocket({
     }
   }
   throw TimeoutException(
-    'serverpod start did not open its MCP socket.\n$output',
+    'serverpod runner did not open its MCP socket.\n$output',
     const Duration(seconds: 60),
   );
 }
@@ -880,7 +885,7 @@ Future<({int exitCode, String output})> _runStartInSubprocess({
     [
       dillPath,
       '--no-interactive',
-      'start',
+      'runner',
       '--directory',
       serverDirectory.path,
       '--no-watch',
@@ -917,14 +922,14 @@ Future<void> _deleteProjectRoot(Directory projectRoot) async {
   }
 }
 
-/// Shuts down a `serverpod start` [process] together with the pod it spawned.
+/// Shuts down a `serverpod runner` [process] together with the pod it spawned.
 ///
 /// On POSIX, SIGINT reaches the CLI's own shutdown path, which stops the pod
 /// for us. Windows has no such signal - `Process.kill` terminates the CLI
 /// outright, leaving the pod running with its working directory inside the
 /// test project, which then cannot be deleted (see the Job Object TODO in
 /// `ServerProcess.start`). `taskkill /T` takes down the whole tree instead.
-Future<void> _terminateStartProcessTree(Process process) async {
+Future<void> _terminateRunnerProcessTree(Process process) async {
   if (Platform.isWindows) {
     await Process.run('taskkill', ['/T', '/F', '/PID', '${process.pid}']);
   } else {

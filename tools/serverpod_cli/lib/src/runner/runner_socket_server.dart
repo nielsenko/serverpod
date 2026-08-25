@@ -35,8 +35,21 @@ class RunnerSocketServer {
   /// Absolute path to this runner's attach socket.
   final String socketPath;
 
+  /// Invoked the first time a client asks for the snapshot, and never again
+  /// for this runner. Auto-launching Flutter apps hangs off this: they appear
+  /// when a UI first arrives, not when the stack came up.
+  ///
+  /// Keyed on the snapshot request rather than on the connection, because a
+  /// connection proves nothing about who made it: liveness probes - `status`,
+  /// `stop`, a second `start`, another worktree's port resolution - connect
+  /// and disconnect without saying a word, and launching Flutter apps for one
+  /// of those is launching them for nobody. Every real client opens with the
+  /// snapshot.
+  void Function()? onFirstClientAttached;
+
   ServerSocket? _serverSocket;
   RunnerApi? _runner;
+  bool _hadClient = false;
   StreamSubscription<void>? _eventSub;
   final Set<json_rpc.Peer> _peers = {};
   final Set<Socket> _sockets = {};
@@ -127,11 +140,13 @@ class RunnerSocketServer {
     // for a zero-argument handler and rejects their absence for one that reads
     // them, and a protocol where that distinction is the caller's problem is a
     // protocol people get wrong.
-    peer.registerMethod(
-      runnerSnapshotMethod,
-      (json_rpc.Parameters _) =>
-          _withRunner((runner) => runner.snapshot().toJson()),
-    );
+    peer.registerMethod(runnerSnapshotMethod, (json_rpc.Parameters _) {
+      if (!_hadClient) {
+        _hadClient = true;
+        onFirstClientAttached?.call();
+      }
+      return _withRunner((runner) => runner.snapshot().toJson());
+    });
 
     peer.registerMethod(
       'hotReload',

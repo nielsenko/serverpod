@@ -95,6 +95,10 @@ Future<RunnerResolution> resolveRunner(
 }
 
 /// Whether something accepts a connection on the Unix socket at [path].
+///
+/// Deliberately says nothing before disconnecting: the runner counts a
+/// client as attached when it asks for the snapshot, so a silent probe does
+/// not read as a UI arriving.
 Future<bool> _isListening(String path, Duration timeout) async {
   if (path.isEmpty) return false;
   try {

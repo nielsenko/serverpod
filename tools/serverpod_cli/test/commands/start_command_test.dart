@@ -48,6 +48,30 @@ void main() {
     );
 
     test(
+      'when resolving configuration without --attach, '
+      'then attaching is on, so `serverpod start` still shows the stack.',
+      () {
+        final config = command.resolveConfiguration(
+          command.argParser.parse([]),
+        );
+
+        expect(config.value(StartOption.attach), isTrue);
+      },
+    );
+
+    test(
+      'when resolving configuration with --no-attach, '
+      'then attaching is off, which is the path an agent takes.',
+      () {
+        final config = command.resolveConfiguration(
+          command.argParser.parse(['--no-attach']),
+        );
+
+        expect(config.value(StartOption.attach), isFalse);
+      },
+    );
+
+    test(
       'when resolving configuration with --docker, '
       'then the docker flag is true.',
       () {
