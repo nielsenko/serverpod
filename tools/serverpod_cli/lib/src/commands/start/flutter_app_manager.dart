@@ -127,6 +127,12 @@ class FlutterAppManager {
   final List<String> serverPackageDirectoryPathParts;
   final String projectName;
 
+  /// The API server's resolved URL, once the pod has reported it.
+  ///
+  /// Null before the first boot, and when the pod bound the configured port
+  /// after all.
+  String? resolvedApiUrl;
+
   /// Whether an app flagged `auto_launch` is launched when the configuration
   /// is loaded.
   ///
@@ -289,7 +295,10 @@ class FlutterAppManager {
     process = FlutterProcess(
       flutterPackageDir: p.joinAll(runtime.app.pathParts),
       device: device,
-      extraArgs: runtime.app.extraRunArgs,
+      extraArgs: [
+        ...runtime.app.extraRunArgs,
+        for (final define in serverUrlDefines()) '--dart-define=$define',
+      ],
       flutterProxy: runtime.proxy,
       flutterExecutable: flutterExecutableForTesting ?? 'flutter',
       machineArgsOverride: argsOverrideForTesting?.call(runtime.app),
@@ -441,6 +450,20 @@ class FlutterAppManager {
         await launch(app.id);
       }
     }
+  }
+
+  /// The `--dart-define` assignments telling an app where the pod is.
+  ///
+  /// `SERVER_URL` because that is the one `getServerUrl` in `serverpod_flutter`
+  /// reads, ahead of `assets/config.json` and its `http://localhost:8080/`
+  /// default - so this reaches an app built from the templates without the app
+  /// having to know the runner exists.
+  ///
+  /// Empty until the pod has reported an address, so an app launched before
+  /// then falls back to whatever its own configuration says.
+  List<String> serverUrlDefines() {
+    final url = resolvedApiUrl;
+    return url == null ? const [] : ['SERVER_URL=$url'];
   }
 
   /// Arms auto-launch and launches every configured app flagged
