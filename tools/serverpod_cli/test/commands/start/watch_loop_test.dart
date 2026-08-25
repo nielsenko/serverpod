@@ -218,6 +218,7 @@ void main() {
         proxy: () => proxy,
         flutterManager: flutterManager,
         mcpSocket: mcp,
+        attachSocket: null,
         stopFileWatcher: () => stopFileWatcherCalls++,
         closeAnalyzers: () async {
           closeAnalyzersCalls++;
@@ -314,6 +315,7 @@ void main() {
           proxy: () => null,
           flutterManager: flutterManager,
           mcpSocket: null,
+          attachSocket: null,
           stopFileWatcher: () => stopFileWatcherCalls++,
           closeAnalyzers: () async {
             closeAnalyzersCalls++;

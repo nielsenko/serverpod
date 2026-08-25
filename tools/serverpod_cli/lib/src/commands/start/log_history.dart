@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:serverpod_cli/src/commands/start/flutter_log_event.dart';
+import 'package:serverpod_cli/src/runner/log_codec.dart';
+import 'package:serverpod_cli/src/runner/runner_event.dart';
 import 'package:serverpod_cli/src/util/strip_ansi.dart';
 import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_tui/serverpod_tui.dart'
@@ -54,6 +57,28 @@ class StartLogHistory {
   /// line buffer.
   void Function(String appId, LogEntry entry)? onFlutterEntry;
 
+  /// When each of [activeOperations] began, so a client attaching mid-operation
+  /// can tell how long it has been running. [TrackedOperation] measures with a
+  /// [Stopwatch] it starts on construction, which cannot cross a socket.
+  final Map<String, DateTime> operationStartTimes = {};
+
+  final StreamController<RunnerEvent> _events =
+      StreamController<RunnerEvent>.broadcast();
+
+  /// Every mutation, as an attach-protocol event.
+  ///
+  /// Broadcast and additive: the single [onChanged]/[onServerEntry] hooks stay
+  /// for the in-process terminal UI, which took them first, while any number of
+  /// attached clients read this.
+  Stream<RunnerEvent> get events => _events.stream;
+
+  void _emit(RunnerEvent event) {
+    if (!_events.isClosed) _events.add(event);
+  }
+
+  /// Stops emitting events. The buffers stay readable for a final snapshot.
+  Future<void> close() => _events.close();
+
   /// The raw output lines of the Flutter app [appId], oldest first.
   ///
   /// Created on first use, so output is retained even when nothing displays
@@ -67,6 +92,7 @@ class StartLogHistory {
   /// Appends [line] to the raw output of the Flutter app [appId].
   void addFlutterLine(String appId, String line) {
     flutterLinesFor(appId).add(line);
+    _emit(FlutterLineEvent(appId: appId, line: line));
     onChanged?.call();
   }
 
@@ -90,6 +116,7 @@ class StartLogHistory {
       case 'log':
         final entry = _logEntryFromEventData(data, scopeLabel: 'server');
         serverEntries.add(entry);
+        _emit(ServerLogEvent(entry));
         onServerEntry?.call(entry);
 
       case 'scope_start':
@@ -97,8 +124,12 @@ class StartLogHistory {
         // Don't track internal scopes as operations.
         if (label == 'INTERNAL') break;
         final id = data['id'] as String? ?? '';
-        activeOperations[id] = TrackedOperation(id: id, label: label);
+        final operation = TrackedOperation(id: id, label: label);
+        final startedAt = DateTime.now();
+        activeOperations[id] = operation;
         _activeServerScopeIds.add(id);
+        operationStartTimes[id] = startedAt;
+        _emit(OperationStartedEvent(operation, startedAt: startedAt));
 
       case 'scope_end':
         final id = data['id'] as String? ?? '';
@@ -107,18 +138,19 @@ class StartLogHistory {
         // non-server operation that later reused the same id.
         if (!_activeServerScopeIds.remove(id)) break;
         final operation = activeOperations.remove(id);
+        operationStartTimes.remove(id);
         if (operation == null) break;
         operation.stopwatch.stop();
         final serverDuration = (data['duration'] as num?)?.toDouble();
-        serverEntries.add(
-          CompletedOperation(
-            label: operation.label,
-            success: data['success'] as bool? ?? true,
-            duration: serverDuration != null
-                ? Duration(microseconds: (serverDuration * 1000000).round())
-                : operation.stopwatch.elapsed,
-          ),
+        final completed = CompletedOperation(
+          label: operation.label,
+          success: data['success'] as bool? ?? true,
+          duration: serverDuration != null
+              ? Duration(microseconds: (serverDuration * 1000000).round())
+              : operation.stopwatch.elapsed,
         );
+        serverEntries.add(completed);
+        _emit(OperationCompletedEvent(completed));
     }
     onChanged?.call();
   }
@@ -142,7 +174,9 @@ class StartLogHistory {
   /// which is already recorded. Only the structured entry is decoded and
   /// handed to [onFlutterEntry].
   void recordFlutterLogEvent(String appId, FlutterLogEvent event) {
-    onFlutterEntry?.call(appId, _flutterLogEntry(appId, event));
+    final entry = _flutterLogEntry(appId, event);
+    _emit(FlutterLogEntryEvent(appId: appId, entry: entry));
+    onFlutterEntry?.call(appId, entry);
     onChanged?.call();
   }
 
@@ -187,6 +221,7 @@ class StartLogHistory {
     }
 
     _addFlutterEntryLines(appId, entry);
+    _emit(FlutterLogEntryEvent(appId: appId, entry: entry));
     onFlutterEntry?.call(appId, entry);
     onChanged?.call();
   }
@@ -268,18 +303,6 @@ LogEntry _logEntryFromEventData(
         ? Map<String, Object?>.from(data['metadata'] as Map)
         : null,
   );
-}
-
-/// The [LogLevel] named by [level]; unknown names are treated as info.
-LogLevel parseLogLevel(String level) {
-  return switch (level) {
-    'debug' => LogLevel.debug,
-    'info' => LogLevel.info,
-    'warning' || 'warn' => LogLevel.warning,
-    'error' => LogLevel.error,
-    'fatal' => LogLevel.fatal,
-    _ => LogLevel.info,
-  };
 }
 
 /// [IOSink] that splits what is written to it into ANSI-free lines and records

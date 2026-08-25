@@ -42,6 +42,8 @@ import 'package:serverpod_cli/src/runner/runner_lock.dart';
 import 'package:serverpod_cli/src/runner/runner_manifest.dart';
 import 'package:serverpod_cli/src/runner/runner_manifest_publisher.dart';
 import 'package:serverpod_cli/src/runner/runner_paths.dart';
+import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
+import 'package:serverpod_cli/src/runner/runner_socket_server.dart';
 import 'package:serverpod_cli/src/util/internal_error.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_cli/src/vm_proxy/proxy.dart';
@@ -729,6 +731,11 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
           );
   }
 
+  // Set once the runner API is constructed below. The Flutter manager's
+  // callbacks are wired before that, and an event raised earlier has no
+  // attached client to reach, so a null here is not a lost event.
+  LocalRunnerApi? runnerEvents;
+
   // IDE-facing Flutter VM-service proxies. Bound now so info files exist at
   // session start regardless of whether `--flutter` was passed.
   final runMode = runModeFromServerArgs(serverArgs.value);
@@ -745,13 +752,22 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     serverPubspecFile: serverPubspecFile,
     serverPackageDirectoryPathParts: config.serverPackageDirectoryPathParts,
     onProgress: (app, stage) => onFlutterProgress?.call(app, stage),
-    onReady: (app, url) => onFlutterReady?.call(app, url),
+    onReady: (app, url) {
+      runnerEvents?.recordFlutterAppState(app.id, running: true, url: url);
+      onFlutterReady?.call(app, url);
+    },
     onStart: (app, process) => _recordExtensionEvents(
       process.vmService,
       (event) => logHistory.recordFlutterExtensionEvent(app.id, event),
     ),
-    onStop: (app) => onFlutterStop?.call(app),
-    onLaunchFailed: (app) => onFlutterLaunchFailed?.call(app),
+    onStop: (app) {
+      runnerEvents?.recordFlutterAppState(app.id, running: false);
+      onFlutterStop?.call(app);
+    },
+    onLaunchFailed: (app) {
+      runnerEvents?.recordFlutterAppState(app.id, running: false);
+      onFlutterLaunchFailed?.call(app);
+    },
     onEnsureAppTab: (app) => onEnsureFlutterAppTab?.call(app),
     onLog: (app, event) => logHistory.recordFlutterLogEvent(app.id, event),
     stdoutSinkFor: (app) => logHistory.flutterOutputSink(
@@ -765,6 +781,8 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
   );
   await flutterManager.initialize();
   onFlutterAppsLoaded?.call(flutterManager.apps.toList());
+  // No runner event here: nothing has attached this early, and the snapshot a
+  // client gets on connect carries the app list.
 
   // Server process factory. Invoked for the initial start and for each
   // subsequent restart driven by the WatchSession
@@ -787,6 +805,9 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       serverProcess.vmService,
       logHistory.recordServerLogEvent,
     );
+    // Fires on the initial boot, on every restart, and on the first boot after
+    // recovering from a degraded start.
+    runnerEvents?.setStage(RunnerStage.running);
     if (onServerStart != null) await onServerStart(serverProcess);
     proxy = await _mountOrRetargetProxy(
       serverProcess: serverProcess,
@@ -890,6 +911,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     flutterAppsLoader: () async {
       await flutterManager.loadApps();
       onFlutterAppsLoaded?.call(flutterManager.apps.toList());
+      runnerEvents?.recordFlutterApps(flutterManager.apps.toList());
       setupFileWatcher();
     },
     applyMigrationsAction: () => _applyMigrationsForSession(
@@ -918,6 +940,11 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     runMode: runMode,
     vmServiceUri: () => proxy?.httpUri.toString(),
     requestShutdown: shutdown.complete,
+    watchModeEnabled: watch,
+  );
+  runnerEvents = runnerApi;
+  runnerApi.setStage(
+    session.isRunning ? RunnerStage.running : RunnerStage.degraded,
   );
 
   // Start MCP socket server for AI agent integration.
@@ -931,6 +958,16 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     mcpSocket = null;
   }
 
+  // Start the attach socket, which a terminal UI or a plain log stream reads.
+  RunnerSocketServer? attachSocket = RunnerSocketServer(serverDir: serverDir);
+  try {
+    await attachSocket.start();
+    attachSocket.connect(runnerApi);
+  } on SocketException catch (e) {
+    log.warning('Failed to start the attach server: $e');
+    attachSocket = null;
+  }
+
   setupFileWatcher();
 
   // Publish where to reach this runner and what it was started with, so
@@ -942,9 +979,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     manifest: RunnerManifest(
       pid: pid,
       sockets: RunnerSockets(
-        // Bound in the version that adds `serverpod attach`; until then the
-        // MCP socket is what a client probes for liveness.
-        tui: '',
+        tui: attachSocket?.socketPath ?? '',
         mcp: mcpSocket?.socketPath ?? '',
       ),
       vmService: RunnerVmServiceUris(proxy: proxy?.httpUri.toString()),
@@ -963,12 +998,13 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
     ),
   );
   await publisher.publish();
-  publisher.republishOn(
-    session.vmServiceUriChanges,
-    (current) => current.copyWith(
+  publisher.republishOn(session.vmServiceUriChanges, (current) {
+    final updated = current.copyWith(
       vmService: RunnerVmServiceUris(proxy: proxy?.httpUri.toString()),
-    ),
-  );
+    );
+    runnerApi.recordManifest(updated);
+    return updated;
+  });
 
   return WatchLoopReady(
     WatchLoopContext(
@@ -977,6 +1013,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       proxy: () => proxy,
       flutterManager: flutterManager,
       mcpSocket: mcpSocket,
+      attachSocket: attachSocket,
       closeAnalyzers: closeAnalyzers,
       stopFileWatcher: () => fileChangeSub?.cancel(),
       stopDocker: startedDocker ? () => _stopDockerServices(serverDir) : null,

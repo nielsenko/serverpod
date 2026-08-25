@@ -7,6 +7,7 @@ import 'package:serverpod_cli/src/commands/start/watch_session.dart';
 import 'package:serverpod_cli/src/runner/runner_api.dart';
 import 'package:serverpod_cli/src/runner/runner_lock.dart';
 import 'package:serverpod_cli/src/runner/runner_manifest_publisher.dart';
+import 'package:serverpod_cli/src/runner/runner_socket_server.dart';
 import 'package:serverpod_cli/src/vm_proxy/proxy.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
@@ -46,6 +47,9 @@ class WatchLoopContext {
   final VmServiceProxy? Function() proxy;
   final FlutterAppManager flutterManager;
   final McpSocketServer? mcpSocket;
+
+  /// The attach socket clients render from. Null when it could not bind.
+  final RunnerSocketServer? attachSocket;
   final Future<void> Function() closeAnalyzers;
   final Future<void> Function()? stopDocker;
   final void Function() stopFileWatcher;
@@ -67,6 +71,7 @@ class WatchLoopContext {
     required this.proxy,
     required this.flutterManager,
     required this.mcpSocket,
+    required this.attachSocket,
     required this.closeAnalyzers,
     required this.stopDocker,
     required this.stopFileWatcher,
@@ -83,6 +88,10 @@ class WatchLoopContext {
     _disposed = true;
     stopFileWatcher();
     await mcpSocket?.close();
+    await attachSocket?.close();
+    // After both sockets, so no client is served from buffers that are being
+    // torn down, and before the session that feeds them.
+    await runnerApi.close();
     await closeAnalyzers();
     await session.dispose();
     await proxy()?.close();

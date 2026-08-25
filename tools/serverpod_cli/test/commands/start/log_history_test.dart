@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:serverpod_cli/src/commands/start/flutter_log_event.dart';
 import 'package:serverpod_cli/src/commands/start/log_history.dart';
+import 'package:serverpod_cli/src/runner/log_codec.dart';
 import 'package:serverpod_shared/log.dart';
 import 'package:serverpod_tui/serverpod_tui.dart';
 import 'package:test/test.dart';
