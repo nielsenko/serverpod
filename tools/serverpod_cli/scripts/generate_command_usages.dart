@@ -5,6 +5,7 @@ import 'package:cli_tools/cli_tools.dart';
 import 'package:path/path.dart' as path;
 import 'package:pub_semver/pub_semver.dart';
 import 'package:serverpod_cli/src/commands/analyze_pubspecs.dart';
+import 'package:serverpod_cli/src/commands/attach.dart';
 import 'package:serverpod_cli/src/commands/cloud.dart';
 import 'package:serverpod_cli/src/commands/create.dart';
 import 'package:serverpod_cli/src/commands/create_migration.dart';
@@ -56,6 +57,7 @@ void main(final List<String> args) {
         onBeforeRunCommand: (_) async {},
       )..addCommands([
         AnalyzePubspecsCommand(),
+        AttachCommand(),
         CloudCommand(),
         CreateCommand(),
         DatabaseCommand(),

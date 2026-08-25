@@ -1,0 +1,394 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:json_rpc_2/json_rpc_2.dart' as json_rpc;
+import 'package:serverpod_cli/src/commands/start/log_history.dart';
+import 'package:serverpod_cli/src/config/flutter_app_config.dart';
+import 'package:serverpod_cli/src/mcp/socket_directory.dart';
+import 'package:serverpod_cli/src/runner/migration_result.dart';
+import 'package:serverpod_cli/src/runner/runner_api.dart';
+import 'package:serverpod_cli/src/runner/runner_event.dart';
+import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
+import 'package:serverpod_cli/src/runner/runner_socket_server.dart';
+import 'package:serverpod_shared/serverpod_shared.dart' show connectUnixSocket;
+
+/// Thrown when the runner cannot be reached at all.
+class RunnerUnreachableException implements Exception {
+  const RunnerUnreachableException(this.socketPath);
+
+  final String socketPath;
+
+  @override
+  String toString() =>
+      'No serverpod runner is listening at $socketPath. '
+      'Start one with `serverpod start`.';
+}
+
+/// A [RunnerApi] backed by a runner in another process.
+///
+/// Materializes the snapshot it receives on connect into a local
+/// [StartLogHistory] and keeps it current from the event stream, so a renderer
+/// reads the same buffers whether it runs inside the runner or attached to one.
+/// Commands are forwarded over JSON-RPC.
+///
+/// Reconnects when the runner restarts, in the manner of the MCP bridge: a
+/// detached runner outlives any one client, and a client that gave up on the
+/// first dropped connection would be useless for the sessions this exists to
+/// support.
+class RunnerClient implements RunnerApi {
+  RunnerClient({
+    required this.socketPath,
+    StartLogHistory? history,
+    Duration reconnectDelay = const Duration(milliseconds: 250),
+  }) : history = history ?? StartLogHistory(),
+       _reconnectDelay = reconnectDelay;
+
+  /// The runner's attach socket.
+  final String socketPath;
+
+  final Duration _reconnectDelay;
+
+  /// The buffers a renderer reads. Filled from the snapshot, then kept current
+  /// from events.
+  ///
+  /// A renderer that already owns a history - the terminal UI's state does -
+  /// passes it in, so the buffers it draws are the ones this fills rather than
+  /// a second copy.
+  final StartLogHistory history;
+
+  final StreamController<RunnerEvent> _events =
+      StreamController<RunnerEvent>.broadcast();
+  final StreamController<bool> _connectionChanges =
+      StreamController<bool>.broadcast();
+
+  json_rpc.Peer? _peer;
+  Socket? _socket;
+  bool _closed = false;
+
+  RunnerStage _stage = RunnerStage.starting;
+  bool _isRunning = false;
+  bool _watchModeEnabled = false;
+  List<FlutterAppConfig> _flutterApps = const [];
+  Set<String> _runningApps = {};
+  final Map<String, String?> _appUrls = {};
+
+  /// Whether a connection to the runner is currently open.
+  bool get isConnected => _peer != null;
+
+  /// Fires with `true` when the client attaches and `false` when it loses the
+  /// runner, so a renderer can say which.
+  Stream<bool> get connectionChanges => _connectionChanges.stream;
+
+  /// The Flutter app URLs seen so far, keyed by app id.
+  Map<String, String?> get flutterAppUrls => Map.unmodifiable(_appUrls);
+
+  /// Connects and loads the first snapshot.
+  ///
+  /// Throws [RunnerUnreachableException] when nothing is listening: the first
+  /// attach is the one place a missing runner is worth reporting rather than
+  /// silently retrying.
+  Future<void> connect() async {
+    if (!await _connectOnce()) throw RunnerUnreachableException(socketPath);
+  }
+
+  /// Detaches. Never stops the runner: that is `serverpod stop`, or `⇧+Q`
+  /// in the UI.
+  @override
+  Future<void> close() async {
+    _closed = true;
+    final peer = _peer;
+    _peer = null;
+    await peer?.close();
+    _socket?.destroy();
+    _socket = null;
+    await _events.close();
+    await _connectionChanges.close();
+  }
+
+  Future<bool> _connectOnce() async {
+    if (_closed) return false;
+    final Socket socket;
+    try {
+      socket = await connectUnixSocket(
+        socketPath,
+        timeout: const Duration(seconds: 2),
+      );
+    } catch (_) {
+      return false;
+    }
+
+    final peer = json_rpc.Peer(socketChannel(socket));
+    peer.registerMethod(runnerEventNotification, (json_rpc.Parameters params) {
+      final event = RunnerEvent.fromJson(
+        Map<String, Object?>.from(params.value as Map),
+      );
+      if (event != null) _apply(event);
+    });
+
+    _socket = socket;
+    // Listening has to start before the snapshot request, since that is what
+    // delivers the response.
+    unawaited(_listenUntilClosed(peer));
+
+    try {
+      _applySnapshot(
+        RunnerSnapshot.fromJson(
+          Map<String, Object?>.from(
+            await peer.sendRequest(
+                  runnerSnapshotMethod,
+                  const <String, Object?>{},
+                )
+                as Map,
+          ),
+        ),
+      );
+    } catch (_) {
+      // The runner went away between connecting and answering. Treat it as a
+      // failed attach; the reconnect loop takes over.
+      await peer.close();
+      return false;
+    }
+
+    // Published only now, so `isConnected` never reports a client whose state
+    // is still half-loaded - a reader that saw it early would render an empty
+    // history as if it were the runner's.
+    _peer = peer;
+    if (!_connectionChanges.isClosed) _connectionChanges.add(true);
+    return true;
+  }
+
+  /// Runs [peer] until the runner goes away, then starts reconnecting.
+  ///
+  /// A runner shutting down mid-message ends the peer with an error, which is
+  /// the ordinary way a `serverpod stop` reaches an attached client.
+  Future<void> _listenUntilClosed(json_rpc.Peer peer) async {
+    try {
+      await peer.listen();
+    } catch (_) {
+      // Disconnected.
+    } finally {
+      _onDisconnected();
+    }
+  }
+
+  void _onDisconnected() {
+    if (_closed) return;
+    _peer = null;
+    _socket = null;
+    if (!_connectionChanges.isClosed) _connectionChanges.add(false);
+    unawaited(_reconnect());
+  }
+
+  Future<void> _reconnect() async {
+    while (!_closed && _peer == null) {
+      await Future<void>.delayed(_reconnectDelay);
+      if (_closed) return;
+      if (await _connectOnce()) return;
+    }
+  }
+
+  /// Replaces the local state with the runner's, which is what makes a
+  /// reconnect after a runner restart correct rather than additive.
+  void _applySnapshot(RunnerSnapshot snapshot) {
+    _stage = snapshot.stage;
+    _isRunning = snapshot.isRunning;
+    _watchModeEnabled = snapshot.watchModeEnabled;
+    _flutterApps = snapshot.flutterApps;
+    _runningApps = {...snapshot.runningFlutterApps};
+
+    history.serverEntries
+      ..clear()
+      ..addAll(snapshot.serverEntries);
+    history.activeOperations.clear();
+    history.operationStartTimes.clear();
+    for (final active in snapshot.activeOperations) {
+      history.activeOperations[active.operation.id] = active.operation;
+      history.operationStartTimes[active.operation.id] = active.startedAt;
+    }
+    for (final entry in snapshot.flutterLines.entries) {
+      history.flutterLinesFor(entry.key)
+        ..clear()
+        ..addAll(entry.value);
+    }
+    _markChanged();
+  }
+
+  void _apply(RunnerEvent event) {
+    switch (event) {
+      case ServerLogEvent(:final entry):
+        history.serverEntries.add(entry);
+        history.onServerEntry?.call(entry);
+
+      case OperationStartedEvent(:final operation, :final startedAt):
+        history.activeOperations[operation.id] = operation;
+        history.operationStartTimes[operation.id] = startedAt;
+
+      case OperationCompletedEvent(:final operation):
+        // The runner keys completions by label, not id: the id it tracked is
+        // its own. Drop whichever active operation matches.
+        history.activeOperations.removeWhere(
+          (_, active) => active.label == operation.label,
+        );
+        history.operationStartTimes.removeWhere(
+          (id, _) => !history.activeOperations.containsKey(id),
+        );
+        history.serverEntries.add(operation);
+
+      case FlutterLineEvent(:final appId, :final line):
+        history.flutterLinesFor(appId).add(line);
+
+      case FlutterLogEntryEvent(:final appId, :final entry):
+        history.onFlutterEntry?.call(appId, entry);
+
+      case StageChangedEvent(:final stage, :final isRunning):
+        _stage = stage;
+        _isRunning = isRunning;
+
+      case FlutterAppsChangedEvent(:final apps):
+        _flutterApps = apps;
+
+      case FlutterAppStateEvent(:final appId, :final running, :final url):
+        if (running) {
+          _runningApps.add(appId);
+        } else {
+          _runningApps.remove(appId);
+        }
+        _appUrls[appId] = url;
+
+      case ManifestChangedEvent():
+        // Addresses only; nothing a renderer shows changes.
+        break;
+    }
+
+    if (!_events.isClosed) _events.add(event);
+    _markChanged();
+  }
+
+  /// Tells the renderer to repaint. [StartLogHistory.onChanged] is the one
+  /// channel for that - the same one the in-process runner fires - so a
+  /// renderer does not have to work out which of two to listen to.
+  void _markChanged() => history.onChanged?.call();
+
+  /// Sends [method] to the runner, or throws when detached.
+  Future<Object?> _send(String method, [Map<String, Object?>? params]) async {
+    final peer = _peer;
+    if (peer == null) throw RunnerUnreachableException(socketPath);
+    return peer.sendRequest(method, params ?? const <String, Object?>{});
+  }
+
+  @override
+  RunnerStage get stage => _stage;
+
+  @override
+  bool get isRunning => _isRunning;
+
+  @override
+  RunnerSnapshot snapshot() => RunnerSnapshot.from(
+    history: history,
+    stage: _stage,
+    isRunning: _isRunning,
+    watchModeEnabled: _watchModeEnabled,
+    flutterApps: _flutterApps,
+    runningFlutterApps: _runningApps,
+  );
+
+  @override
+  Stream<RunnerEvent> get events => _events.stream;
+
+  @override
+  Future<void> hotReload() => _send('hotReload');
+
+  @override
+  Future<void> hotRestart() => _send('hotRestart');
+
+  @override
+  Future<void> retryStart() => _send('retryStart');
+
+  @override
+  Future<void> stop() => _send('stop');
+
+  @override
+  Future<void> applyMigrations() => _send('applyMigrations');
+
+  @override
+  Future<MigrationResult> createMigration({String? tag, bool force = false}) =>
+      _send('createMigration', {
+        'tag': ?tag,
+        'force': force,
+      }).then(_migrationResult);
+
+  @override
+  Future<MigrationResult> createRepairMigration({
+    String? tag,
+    bool force = false,
+    String? targetVersion,
+  }) => _send('createRepairMigration', {
+    'tag': ?tag,
+    'force': force,
+    'targetVersion': ?targetVersion,
+  }).then(_migrationResult);
+
+  @override
+  List<FlutterAppConfig> get flutterApps => _flutterApps;
+
+  @override
+  bool isFlutterAppRunning(String appId) => _runningApps.contains(appId);
+
+  /// Which apps the runner reports as running.
+  Set<String> get runningFlutterApps => Set.unmodifiable(_runningApps);
+
+  /// Whether the runner was started in watch mode.
+  ///
+  /// Exposed alongside [stage] and [isRunning] so a renderer can read the
+  /// handful of scalars it draws without building a whole [snapshot], which
+  /// copies every retained log line to do it.
+  bool get watchModeEnabled => _watchModeEnabled;
+
+  @override
+  bool isFlutterAppLaunching(String appId) => false;
+
+  @override
+  bool get isAnyFlutterAppRunning => _runningApps.isNotEmpty;
+
+  @override
+  Future<bool> launchFlutterApp(String appId) =>
+      _send('launchFlutterApp', {'appId': appId}).then(
+        (result) => (result as Map?)?['alreadyRunning'] as bool? ?? false,
+      );
+
+  @override
+  Future<void> restartFlutterApp(String appId) =>
+      _send('restartFlutterApp', {'appId': appId});
+
+  @override
+  Future<void> stopFlutterApp(String appId) =>
+      _send('stopFlutterApp', {'appId': appId});
+
+  @override
+  Future<void> restartFlutterApps() => _send('restartFlutterApps');
+
+  /// Not carried over the attach protocol: DTD is an agent concern, served by
+  /// the MCP socket, and no renderer shows it.
+  @override
+  Map<String, String?> get flutterDtdUris => const {};
+
+  @override
+  List<Object> get logHistory => history.serverEntries.toList();
+
+  @override
+  List<String> flutterLogHistory(String appId) =>
+      history.flutterLinesFor(appId).toList();
+
+  /// Not carried over the attach protocol: an attached UI never drives the VM
+  /// service, and `serverpod status` reads it from the manifest.
+  @override
+  String? get vmServiceUri => null;
+
+  @override
+  Stream<void> get vmServiceUriChanges =>
+      events.where((event) => event is ManifestChangedEvent);
+}
+
+MigrationResult _migrationResult(Object? result) => MigrationResult.fromJson(
+  Map<String, Object?>.from(result as Map? ?? const {}),
+);
