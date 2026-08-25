@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:async/async.dart' show StreamGroup;
+
 import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_app_manager.dart';
@@ -11,6 +13,9 @@ import 'package:serverpod_cli/src/migrations/create_migration_action.dart';
 import 'package:serverpod_cli/src/migrations/create_repair_migration_action.dart';
 import 'package:serverpod_cli/src/runner/migration_result.dart';
 import 'package:serverpod_cli/src/runner/runner_api.dart';
+import 'package:serverpod_cli/src/runner/runner_event.dart';
+import 'package:serverpod_cli/src/runner/runner_manifest.dart';
+import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
 import 'package:serverpod_shared/serverpod_shared.dart'
     show MigrationAbortedException;
 
@@ -30,7 +35,9 @@ class LocalRunnerApi implements InProcessRunnerApi {
     required String runMode,
     required String? Function() vmServiceUri,
     required void Function() requestShutdown,
+    required bool watchModeEnabled,
   }) : _session = session,
+       _watchModeEnabled = watchModeEnabled,
        _flutterManager = flutterManager,
        _logHistory = logHistory,
        _config = config,
@@ -43,12 +50,107 @@ class LocalRunnerApi implements InProcessRunnerApi {
   final StartLogHistory _logHistory;
   final GeneratorConfig _config;
   final String _runMode;
+  final bool _watchModeEnabled;
 
   /// Resolved at call time rather than held: a degraded start has no proxy
   /// until the server first boots.
   final String? Function() _vmServiceUri;
 
   final void Function() _requestShutdown;
+
+  /// Events this object raises itself - stage transitions and Flutter app
+  /// state - merged with the ones the log history emits.
+  final StreamController<RunnerEvent> _own =
+      StreamController<RunnerEvent>.broadcast();
+
+  RunnerStage _stage = RunnerStage.starting;
+
+  @override
+  RunnerStage get stage => _stage;
+
+  /// Records that the runner reached [stage] and tells every attached client.
+  ///
+  /// Called by the watch loop at the points it already knew about; holding the
+  /// stage here rather than deriving it per client is what lets a UI attaching
+  /// during a slow first compile show progress instead of an empty screen.
+  ///
+  /// [exitCode] carries what the runner is leaving with on
+  /// [RunnerStage.stopping], which is the only way a client that renders the
+  /// stack rather than hosting it can report the pod's status.
+  ///
+  /// The event's running flag follows the stage rather than [isRunning]: the
+  /// running stage is announced from inside the server factory, before the
+  /// session has been handed the process it is about to return, and nothing
+  /// announces again once it has. Read live, a client recovering from a
+  /// degraded start was told the server was running and not running in the
+  /// same breath, and kept every action disabled.
+  void setStage(RunnerStage stage, {int? exitCode}) {
+    if (_stage == stage) return;
+    _stage = stage;
+    _emit(
+      StageChangedEvent(
+        stage,
+        isRunning: stage == RunnerStage.running,
+        exitCode: exitCode,
+      ),
+    );
+  }
+
+  /// Records that [appId] started or stopped.
+  void recordFlutterAppState(
+    String appId, {
+    required bool running,
+    String? url,
+  }) => _emit(FlutterAppStateEvent(appId: appId, running: running, url: url));
+
+  /// Records that the set of configured apps changed.
+  void recordFlutterApps(List<FlutterAppConfig> apps) =>
+      _emit(FlutterAppsChangedEvent(apps));
+
+  /// Records that a published address changed.
+  void recordManifest(RunnerManifest manifest) =>
+      _emit(ManifestChangedEvent(manifest));
+
+  void _emit(RunnerEvent event) {
+    if (!_own.isClosed) _own.add(event);
+  }
+
+  /// Everything this runner raises, for every surface that renders it.
+  ///
+  /// One group, built once and broadcast: [RunnerApi.events] promises that
+  /// several clients can listen, and a merge is single-subscription. Built per
+  /// access, as it was, a second listener on the same stream threw, and every
+  /// access opened another set of subscriptions to the same two sources.
+  late final StreamGroup<RunnerEvent> _eventGroup = StreamGroup.broadcast()
+    ..add(_logHistory.events)
+    ..add(_own.stream);
+
+  @override
+  Stream<RunnerEvent> get events => _eventGroup.stream;
+
+  @override
+  RunnerSnapshot snapshot() => RunnerSnapshot.from(
+    history: _logHistory,
+    stage: _stage,
+    isRunning: isRunning,
+    watchModeEnabled: _watchModeEnabled,
+    canLaunchFlutterApps: canLaunchFlutterApps,
+    flutterApps: flutterApps,
+    runningFlutterApps: {
+      for (final app in flutterApps)
+        if (isFlutterAppRunning(app.id)) app.id,
+    },
+  );
+
+  /// Stops emitting events.
+  ///
+  /// The buffers stay readable for a final snapshot.
+  @override
+  Future<void> close() async {
+    await _own.close();
+    await _logHistory.close();
+    await _eventGroup.close();
+  }
 
   @override
   bool get isRunning => _session.isRunning;
@@ -125,6 +227,9 @@ class LocalRunnerApi implements InProcessRunnerApi {
   @override
   bool isFlutterAppLaunching(String appId) =>
       _flutterManager.isLaunching(appId);
+
+  @override
+  bool get canLaunchFlutterApps => _flutterManager.canLaunchApps;
 
   @override
   bool get isAnyFlutterAppRunning => _session.isFlutterAppRunning;
