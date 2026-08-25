@@ -5,6 +5,8 @@ import 'package:serverpod_cli/src/commands/start/flutter_app_manager.dart';
 import 'package:serverpod_cli/src/commands/start/mcp_socket.dart';
 import 'package:serverpod_cli/src/commands/start/watch_session.dart';
 import 'package:serverpod_cli/src/runner/runner_api.dart';
+import 'package:serverpod_cli/src/runner/runner_lock.dart';
+import 'package:serverpod_cli/src/runner/runner_manifest_publisher.dart';
 import 'package:serverpod_cli/src/vm_proxy/proxy.dart';
 import 'package:serverpod_shared/serverpod_shared.dart';
 
@@ -48,6 +50,15 @@ class WatchLoopContext {
   final Future<void> Function()? stopDocker;
   final void Function() stopFileWatcher;
   final String vmServiceInfoFile;
+
+  /// Keeps `runner.json` current, and removes it on dispose. Null in tests
+  /// that build a context without publishing one.
+  final RunnerManifestPublisher? manifestPublisher;
+
+  /// The one-runner-per-package lock, released last so nothing else can claim
+  /// the package while this one is still tearing down.
+  final RunnerLock? lock;
+
   bool _disposed = false;
 
   WatchLoopContext({
@@ -60,6 +71,8 @@ class WatchLoopContext {
     required this.stopDocker,
     required this.stopFileWatcher,
     required this.vmServiceInfoFile,
+    this.manifestPublisher,
+    this.lock,
   });
 
   /// Whether [dispose] has been called.
@@ -75,6 +88,8 @@ class WatchLoopContext {
     await proxy()?.close();
     await flutterManager.dispose();
     await File(vmServiceInfoFile).deleteIfExists();
+    await manifestPublisher?.dispose();
     await stopDocker?.call();
+    await lock?.release();
   }
 }

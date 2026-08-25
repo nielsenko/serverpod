@@ -21,6 +21,7 @@ import 'package:serverpod_cli/src/commands/quickstart.dart';
 import 'package:serverpod_cli/src/commands/run.dart';
 import 'package:serverpod_cli/src/commands/serverpod_command_runner.dart';
 import 'package:serverpod_cli/src/commands/start.dart';
+import 'package:serverpod_cli/src/commands/status.dart';
 import 'package:serverpod_cli/src/commands/upgrade.dart';
 import 'package:serverpod_cli/src/commands/version.dart';
 import 'package:serverpod_cli/src/downloads/resource_manager.dart';
@@ -134,6 +135,7 @@ ServerpodCommandRunner buildCommandRunner() {
     MigrateCommand(),
     RunCommand(),
     StartCommand(),
+    StatusCommand(),
     UpgradeCommand(),
     VersionCommand(version),
   ]);
