@@ -14,6 +14,7 @@ import 'package:serverpod/src/config/version.dart';
 import 'package:serverpod/src/server/command_line_args.dart';
 import 'package:serverpod/src/server/diagnostic_events/diagnostic_events.dart';
 import 'package:serverpod/src/server/features.dart';
+import 'package:serverpod/src/server/vm_service_addresses.dart';
 import 'package:serverpod/src/server/future_call_manager/future_call_diagnostics_service.dart';
 import 'package:serverpod/src/server/health_check_manager.dart';
 import 'package:serverpod/src/server/log_manager/log_cleanup.dart';
@@ -893,6 +894,8 @@ class Serverpod {
         );
       }
 
+      _publishResolvedAddresses();
+
       _internalLogVerbose('All servers started.');
     }
 
@@ -1228,6 +1231,41 @@ class Serverpod {
     }
     return ok;
   }
+
+  /// Folds the ports the listeners actually bound back into [config], then
+  /// announces the resulting addresses over the VM service.
+  ///
+  /// With a configured port of 0 - which is how the runner asks for an
+  /// ephemeral port when the configured one is taken by another worktree's
+  /// stack - the real port is only known now. Advertising the configured one
+  /// would send clients to a port nothing is listening on.
+  void _publishResolvedAddresses() {
+    final api = config.apiServer.withResolvedPort(server.port);
+    final insights = _insightsServer == null
+        ? null
+        : config.insightsServer?.withResolvedPort(_insightsServer!.port);
+    final webPort = Features.enableWebServer(_webServer)
+        ? webServer.port
+        : null;
+    final web = webPort == null
+        ? null
+        : config.webServer?.withResolvedPort(webPort);
+
+    config = config.copyWith(
+      apiServer: api,
+      insightsServer: insights,
+      webServer: web,
+    );
+
+    postServerpodAddresses(
+      api: _publicUrl(api),
+      insights: insights == null ? null : _publicUrl(insights),
+      web: web == null ? null : _publicUrl(web),
+    );
+  }
+
+  static String _publicUrl(ServerConfig server) =>
+      '${server.publicScheme}://${server.publicHost}:${server.publicPort}';
 
   /// Shuts down the Serverpod and all associated servers.
   /// If [exitProcess] is set to false, the process will not exit at the end of

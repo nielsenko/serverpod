@@ -34,6 +34,7 @@ import 'package:serverpod_cli/src/generator/generation_staleness.dart';
 import 'package:serverpod_cli/src/generator/isolated_analyzers.dart';
 import 'package:serverpod_cli/src/migrations/cli_migration_runner.dart';
 import 'package:serverpod_cli/src/runner/local_runner_api.dart';
+import 'package:serverpod_cli/src/runner/port_resolution.dart';
 import 'package:serverpod_cli/src/runner/runner_discovery.dart';
 import 'package:serverpod_cli/src/runner/runner_lock.dart';
 import 'package:serverpod_cli/src/runner/runner_manifest.dart';
@@ -445,10 +446,31 @@ File? _findComposeFile(String serverDir) {
   return null;
 }
 
+/// The server's resolved configuration, or null when it cannot be read.
+///
+/// Null is not exceptional: the project may be mid-setup with an incomplete
+/// config. Every caller here treats that as "decide nothing and let the pod
+/// report what is wrong".
+ServerpodConfig? _loadServerConfig({
+  required String serverDir,
+  required String runMode,
+}) {
+  try {
+    return ServerpodConfig.load(
+      runMode,
+      null,
+      PasswordManager(runMode: runMode).loadPasswords(serverDir: serverDir),
+      serverDir: serverDir,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 bool _resolveStartDocker({
   required bool? dockerFlag,
   required String serverDir,
-  required String runMode,
+  required ServerpodConfig? serverConfig,
 }) {
   if (dockerFlag != null) return dockerFlag;
 
@@ -457,27 +479,65 @@ bool _resolveStartDocker({
   // explicit --docker treats a missing compose file as an error.
   if (_findComposeFile(serverDir) == null) return false;
 
-  try {
-    final passwords = PasswordManager(runMode: runMode).loadPasswords(
-      serverDir: serverDir,
-    );
-    final serverConfig = ServerpodConfig.load(
-      runMode,
-      null,
-      passwords,
-      serverDir: serverDir,
-    );
-    final database = serverConfig.database;
-    if (database is! PostgresDatabaseConfig || database.dataPath != null) {
-      return false;
-    }
-    return database.host.toLowerCase() == 'localhost' ||
-        database.host == '127.0.0.1';
-  } catch (_) {
-    // Config may be incomplete during early project setup; do not start
-    // Docker automatically. Users can still pass --docker explicitly.
+  // Config may be incomplete during early project setup; do not start Docker
+  // automatically. Users can still pass --docker explicitly.
+  if (serverConfig == null) return false;
+
+  final database = serverConfig.database;
+  if (database is! PostgresDatabaseConfig || database.dataPath != null) {
     return false;
   }
+  return database.host.toLowerCase() == 'localhost' ||
+      database.host == '127.0.0.1';
+}
+
+/// Decides which ports the pod should bind, as environment overrides.
+///
+/// Returns an empty map when the configured ports are free, the ephemeral
+/// overrides when another Serverpod runner holds them, and null when something
+/// else does - which is an error rather than a fallback, since moving aside
+/// would hide a stray pod or an unrelated service on the same port.
+///
+/// Only development falls back. In production a taken port is a
+/// misconfiguration, and quietly serving from a different one would be worse
+/// than refusing.
+Future<Map<String, String>?> _resolvePortEnvironment({
+  required String serverDir,
+  required String runMode,
+  required ServerpodConfig? serverConfig,
+}) async {
+  if (runMode != 'development') return const {};
+  // An incomplete config during early project setup: leave the ports alone and
+  // let the pod report whatever it finds wrong.
+  if (serverConfig == null) return const {};
+
+  final ports = {
+    'api': serverConfig.apiServer.port,
+    if (serverConfig.insightsServer != null)
+      'insights': serverConfig.insightsServer!.port,
+    if (serverConfig.webServer != null) 'web': serverConfig.webServer!.port,
+  };
+
+  final resolution = await resolvePorts(serverDir: serverDir, ports: ports);
+
+  if (resolution.hasConflicts) {
+    for (final conflict in resolution.conflicts.entries) {
+      log.error(
+        'The ${conflict.key} server port ${conflict.value} is in use by '
+        'something that is not a Serverpod runner. Free it, or change the '
+        'port in config/$runMode.yaml.',
+      );
+    }
+    return null;
+  }
+
+  if (!resolution.useEphemeral) return const {};
+
+  log.info(
+    'The configured ports are in use by another Serverpod runner. '
+    'Binding ephemeral ports instead; `serverpod status` prints them.',
+  );
+  return ephemeralPortEnvironment(ports.keys);
 }
 
 /// Ensures Docker Compose services are running.
@@ -614,6 +674,18 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   IOSink? serverStdoutSink,
   IOSink? serverStderrSink,
 }) async {
+  // Set once the manifest publisher exists, which is after the initial boot:
+  // the pod can report its addresses before there is anywhere to put them, so
+  // the last report is held and replayed rather than dropped. Losing it would
+  // leave the manifest without servers and every app launched on first attach
+  // without an api url - exactly the ephemeral-port case this serves.
+  void Function(Map<String, Object?>)? onServerAddresses;
+  Map<String, Object?>? lastServerAddresses;
+  void reportServerAddresses(Map<String, Object?> addresses) {
+    lastServerAddresses = addresses;
+    onServerAddresses?.call(addresses);
+  }
+
   log.info(watch ? 'Starting server in watch mode...' : 'Starting server...');
 
   // One runner per server package. Probing a socket is a check followed by a
@@ -675,10 +747,29 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     return const WatchLoopAborted(0);
   }
 
+  // Decide the ports before anything provisions: a stack that has to move
+  // aside for another worktree should do so before Docker is brought up, and a
+  // port held by something that is not a runner is an error, not a fallback.
+  final runMode = runModeFromServerArgs(serverArgs.value);
+  final serverConfig = _loadServerConfig(
+    serverDir: serverDir,
+    runMode: runMode,
+  );
+
+  final portEnvironment = await _resolvePortEnvironment(
+    serverDir: serverDir,
+    runMode: runMode,
+    serverConfig: serverConfig,
+  );
+  if (portEnvironment == null) {
+    await lock.release();
+    return const WatchLoopAborted(1);
+  }
+
   final startDocker = _resolveStartDocker(
     dockerFlag: docker,
     serverDir: serverDir,
-    runMode: runModeFromServerArgs(serverArgs.value),
+    serverConfig: serverConfig,
   );
 
   var startedDocker = false;
@@ -870,7 +961,6 @@ Future<WatchLoopSetupResult> setupWatchLoop({
 
   // IDE-facing Flutter VM-service proxies. Bound now so info files exist at
   // session start regardless of whether `--flutter` was passed.
-  final runMode = runModeFromServerArgs(serverArgs.value);
   final serverPubspecFile = File(p.join(serverDir, 'pubspec.yaml'));
   final flutterManager = FlutterAppManager(
     runMode: runMode,
@@ -917,13 +1007,16 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       stdoutSink: serverStdoutSink,
       stderrSink: serverStderrSink,
       onDispose: logHistory.discardActiveServerScopes,
+      environment: portEnvironment.isEmpty ? null : portEnvironment,
     );
     await serverProcess.start(dillPath: dillPath);
     await serverProcess.connectToVmService();
-    await _recordExtensionEvents(
-      serverProcess.vmService,
-      logHistory.recordServerLogEvent,
-    );
+    await _recordExtensionEvents(serverProcess.vmService, (event) {
+      logHistory.recordServerLogEvent(event);
+      if (event.extensionKind == 'ext.serverpod.addresses') {
+        reportServerAddresses(event.extensionData?.data ?? const {});
+      }
+    });
     // Fires on the initial boot, on every restart, and on the first boot after
     // recovering from a degraded start.
     runnerEvents?.setStage(RunnerStage.running);
@@ -1117,6 +1210,21 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     ),
   );
   await publisher.publish();
+  onServerAddresses = (addresses) {
+    // The pod posts the shape the manifest publishes, so it is decoded by the
+    // type that publishes it rather than key by key here.
+    final servers = RunnerServerUris.fromJson(addresses);
+    // Apps launched from here are told the pod's real address; the ones
+    // already running keep the one they were given until they are relaunched.
+    flutterManager.resolvedApiUrl = servers.api;
+    final updated = publisher.manifest.copyWith(servers: servers);
+    runnerApi.recordManifest(updated);
+    unawaited(publisher.replace(updated));
+  };
+  if (lastServerAddresses case final addresses?) {
+    onServerAddresses(addresses);
+  }
+
   publisher.republishOn(session.vmServiceUriChanges, (current) {
     final updated = current.copyWith(
       vmService: RunnerVmServiceUris(proxy: proxy?.httpUri.toString()),
