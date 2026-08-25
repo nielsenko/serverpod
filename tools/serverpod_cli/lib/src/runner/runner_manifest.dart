@@ -292,6 +292,29 @@ class RunnerConfig {
       'server arguments after --',
   ];
 
+  /// The `serverpod runner serve` arguments that reproduce this configuration.
+  ///
+  /// `serverpod start` brings a runner up by spawning `runner serve` with
+  /// these, and compares what came back with [differencesFrom]. Both sides of
+  /// that round trip belong to the same type: stated at the spawn site
+  /// instead, a new stack-shaping option is an unchecked second place to
+  /// remember, and one that disagrees produces a runner configured
+  /// differently from what the comparison expects.
+  ///
+  /// A null [docker] passes neither flag, leaving the runner to derive the
+  /// default from the project.
+  List<String> toServeArgs({required String directory}) {
+    return [
+      '--directory',
+      directory,
+      if (watch) '--watch' else '--no-watch',
+      if (flutter) '--flutter' else '--no-flutter',
+      if (docker == true) '--docker',
+      if (docker == false) '--no-docker',
+      if (serverArgs.isNotEmpty) ...['--', ...serverArgs],
+    ];
+  }
+
   Map<String, Object?> toJson() => {
     'watch': watch,
     'flutter': flutter,
