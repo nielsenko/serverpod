@@ -73,6 +73,8 @@ class RunnerClient implements RunnerApi {
       StreamController<RunnerEvent>.broadcast();
   final StreamController<bool> _connectionChanges =
       StreamController<bool>.broadcast();
+  final StreamController<void> _snapshotChanges =
+      StreamController<void>.broadcast();
 
   json_rpc.Peer? _peer;
   Socket? _socket;
@@ -112,6 +114,16 @@ class RunnerClient implements RunnerApi {
   /// runner, so a renderer can say which.
   Stream<bool> get connectionChanges => _connectionChanges.stream;
 
+  /// Fires whenever the local state is replaced wholesale by a snapshot: on
+  /// attach, on reconnect, and when the runner swaps the API behind the socket.
+  ///
+  /// A renderer that derives anything from this client's scalars has to
+  /// recompute it here. A snapshot moves them all at once and emits no event
+  /// per field, so following [events] alone leaves a derived value - whether
+  /// launching apps can do anything, say - reading the state of a runner that
+  /// has since been replaced.
+  Stream<void> get snapshotChanges => _snapshotChanges.stream;
+
   /// The Flutter app URLs seen so far, keyed by app id.
   Map<String, String?> get flutterAppUrls => Map.unmodifiable(_appUrls);
 
@@ -135,9 +147,23 @@ class RunnerClient implements RunnerApi {
   /// What a renderer calls. The snapshot request tells the runner a UI has
   /// arrived; the reconnect loop is what lets a client outlive a runner
   /// restart, which a one-shot command has no use for.
-  Future<void> attach() async {
+  /// [waitFor] bounds how long to keep retrying the first connection, for a
+  /// caller that has just spawned a runner and knows the socket is coming.
+  /// Without it a missing runner is reported at once.
+  Future<void> attach({Duration? waitFor}) async {
     _attached = true;
-    await connect();
+    if (waitFor == null) {
+      await connect();
+      return;
+    }
+    final deadline = DateTime.now().add(waitFor);
+    while (!await _connectOnce()) {
+      if (_closed) return;
+      if (DateTime.now().isAfter(deadline)) {
+        throw RunnerUnreachableException(socketPath);
+      }
+      await Future<void>.delayed(_reconnectDelay);
+    }
   }
 
   /// Detaches.
@@ -154,6 +180,7 @@ class RunnerClient implements RunnerApi {
     _socket = null;
     await _events.close();
     await _connectionChanges.close();
+    await _snapshotChanges.close();
   }
 
   Future<bool> _connectOnce() async {
@@ -178,6 +205,14 @@ class RunnerClient implements RunnerApi {
         Map<String, Object?>.from(params.value as Map),
       );
       if (event != null) _apply(event);
+    });
+    peer.registerMethod(runnerSnapshotNotification, (
+      json_rpc.Parameters params,
+    ) {
+      if (!_attached) return;
+      _applySnapshot(
+        RunnerSnapshot.fromJson(Map<String, Object?>.from(params.value as Map)),
+      );
     });
 
     _socket = socket;
@@ -294,6 +329,7 @@ class RunnerClient implements RunnerApi {
         ..addAll(entry.value);
     }
     _markChanged();
+    if (!_snapshotChanges.isClosed) _snapshotChanges.add(null);
   }
 
   void _apply(RunnerEvent event) {

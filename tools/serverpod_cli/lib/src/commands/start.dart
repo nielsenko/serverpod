@@ -166,24 +166,34 @@ class StartCommand extends ServerpodCommand<StartOption> {
       serverArgs: argResults?.rest ?? const [],
     );
 
+    final attaching = commandConfig.value(StartOption.attach);
+
     final manifest = await ensureRunner(
       config: config,
       serverDir: serverDir,
       asked: asked,
       useTui: commandConfig.value(StartOption.tui),
+      awaitManifest: !attaching,
     );
 
-    if (!commandConfig.value(StartOption.attach)) {
-      log.info('Runner ready (pid ${manifest.pid}).');
+    if (!attaching) {
+      log.info('Runner ready (pid ${manifest!.pid}).');
       log.info(
         'Attach with `serverpod runner attach`, stop with `serverpod runner stop`.',
       );
       return;
     }
 
-    final socketPath = requireAttachSocket(manifest);
+    final socketPath = manifest == null
+        ? serverpodTuiSocketPath(serverDir)
+        : requireAttachSocket(manifest);
     final useTui = commandConfig.value(StartOption.tui) && stdout.hasTerminal;
-    final exitCode = await attachTo(socketPath, useTui: useTui);
+    final waitForRunner = manifest == null ? _runnerStartTimeout : null;
+    final exitCode = await attachTo(
+      socketPath,
+      useTui: useTui,
+      waitForRunner: waitForRunner,
+    );
     if (exitCode != 0) throw ExitException(exitCode);
   }
 }
@@ -223,12 +233,17 @@ Future<GeneratorConfig> loadRunnerProjectConfig({
 /// invocation asked for. Attaching anyway with a warning would leave a caller
 /// that reads only the exit status believing it got what it asked for.
 ///
+/// The runner returned may still be starting: it publishes before Docker,
+/// generation and the first compile, so a caller about to attach can watch
+/// them. A caller with nothing to render waits with [awaitStackUp].
+///
 /// [useTui] is reported to analytics only; nothing here renders.
-Future<RunnerManifest> ensureRunner({
+Future<RunnerManifest?> ensureRunner({
   required GeneratorConfig config,
   required String serverDir,
   required RunnerConfig asked,
   required bool useTui,
+  required bool awaitManifest,
 }) async {
   switch (await resolveRunner(serverDir)) {
     case IncompatibleRunner(:final message):
@@ -249,12 +264,14 @@ Future<RunnerManifest> ensureRunner({
       }
       return manifest;
 
-    case NoRunner():
+    case NoRunner(:final staleManifest):
+      if (staleManifest != null) await RunnerManifest.deleteFrom(serverDir);
       return _spawnRunner(
         config: config,
         serverDir: serverDir,
         asked: asked,
         useTui: useTui,
+        awaitManifest: awaitManifest,
       );
   }
 }
@@ -371,11 +388,12 @@ Future<void> _printRunnerLogTail(String serverDir, {int lines = 20}) async {
 /// Detached, because the operating system delivers SIGINT to a whole process
 /// group: a runner spawned in this terminal's group would die on the next
 /// Ctrl+C in it. [ProcessStartMode.detached] puts it in a group of its own.
-Future<RunnerManifest> _spawnRunner({
+Future<RunnerManifest?> _spawnRunner({
   required GeneratorConfig config,
   required String serverDir,
   required RunnerConfig asked,
   required bool useTui,
+  required bool awaitManifest,
 }) async {
   unawaited(
     _captureSessionStartAnalytics(
@@ -399,6 +417,8 @@ Future<RunnerManifest> _spawnRunner({
     ],
     mode: ProcessStartMode.detached,
   );
+
+  if (!awaitManifest) return null;
 
   switch (await _awaitManifest(serverDir, pid: process.pid)) {
     case _RunnerPublished(:final manifest):
@@ -459,7 +479,7 @@ final class _RunnerTimedOut extends _RunnerStartOutcome {
 Future<_RunnerStartOutcome> _awaitManifest(
   String serverDir, {
   required int pid,
-  Duration timeout = const Duration(minutes: 2),
+  Duration timeout = _runnerStartTimeout,
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (true) {
@@ -480,6 +500,13 @@ Future<_RunnerStartOutcome> _awaitManifest(
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
 }
+
+/// How long a freshly spawned runner is given to come up, whether that is
+/// waited out for its manifest or spent retrying its socket.
+///
+/// Long because it covers a cold start: code generation, `docker compose up`
+/// pulling an image, and a first compile.
+const _runnerStartTimeout = Duration(minutes: 2);
 
 /// Constructs a [NativeAssetsBuilder] for the server at [serverDir]. The
 /// builder discovers `package_config.json` itself (walking up to a workspace
@@ -731,6 +758,27 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     return const WatchLoopAborted(1);
   }
 
+  final runnerApi = LocalRunnerApi(
+    logHistory: logHistory,
+    requestShutdown: shutdown.complete,
+    watchModeEnabled: watch,
+  );
+
+  RunnerSocketServer? attachSocket = RunnerSocketServer(serverDir: serverDir);
+  try {
+    await attachSocket.start();
+    attachSocket.connect(runnerApi);
+  } on SocketException catch (e) {
+    log.warning('Failed to start the attach server: $e');
+    attachSocket = null;
+  }
+
+  Future<void> releaseRunnerHold({required int exitCode}) async {
+    runnerApi.setStage(RunnerStage.stopping, exitCode: exitCode);
+    await attachSocket?.close();
+    await lock.release();
+  }
+
   final serverpodToolDir = serverpodToolDirPath(serverDir);
   final vmServiceInfoFile = p.join(serverpodToolDir, 'vm-service-info.json');
   // The pod always writes its raw VM service URI to a separate file; the
@@ -746,7 +794,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   if (existingUri != null) {
     log.info('Existing server found.');
     log.info('VM service proxy listening on $existingUri');
-    await lock.release();
+    await releaseRunnerHold(exitCode: 0);
     return const WatchLoopAborted(0);
   }
 
@@ -764,7 +812,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       return dockerStarted != null;
     });
     if (dockerStarted == null) {
-      await lock.release();
+      await releaseRunnerHold(exitCode: 1);
       return const WatchLoopAborted(1);
     }
     startedDocker = dockerStarted!;
@@ -774,9 +822,14 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     if (startedDocker) await _stopDockerServices(serverDir);
   }
 
-  Future<void> rollbackProvisioning() async {
+  Future<void> rollbackProvisioning({int exitCode = 1}) async {
     await stopDockerIfStarted();
-    await lock.release();
+    await releaseRunnerHold(exitCode: exitCode);
+  }
+
+  if (shutdown.isShutdown) {
+    await rollbackProvisioning(exitCode: 0);
+    return const WatchLoopAborted(0);
   }
 
   final requestedServerArgs = [...serverArgs.value];
@@ -797,11 +850,11 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   // Tear down everything provisioned so far: the analyzer isolate and any
   // Docker services. A failed/in-flight analyzer future must not prevent the
   // Docker teardown, so closing it is guarded.
-  Future<void> rollbackStartup() async {
+  Future<void> rollbackStartup({int exitCode = 1}) async {
     try {
       await closeAnalyzers();
     } catch (_) {}
-    await rollbackProvisioning();
+    await rollbackProvisioning(exitCode: exitCode);
   }
 
   // keepPrimedWhenFresh: the analyzers are needed by the watch session even when
@@ -835,6 +888,11 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     log.error('Code generation failed.');
   } else if (genResult.upToDate) {
     log.info(generatedCodeAlreadyUpToDate, type: TextLogType.success);
+  }
+
+  if (shutdown.isShutdown) {
+    await rollbackStartup(exitCode: 0);
+    return const WatchLoopAborted(0);
   }
 
   // FES setup (watch mode only).
@@ -902,6 +960,12 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       }
     }
 
+    if (shutdown.isShutdown) {
+      await localCompiler.dispose();
+      await rollbackStartup(exitCode: 0);
+      return const WatchLoopAborted(0);
+    }
+
     compiler = localCompiler;
     nativeAssetsBuilder = localBuilder;
     dartExecutable = localCompiler.dartExecutable;
@@ -923,8 +987,6 @@ Future<WatchLoopSetupResult> setupWatchLoop({
           );
   }
 
-  LocalRunnerApi? runnerEvents;
-
   // IDE-facing Flutter VM-service proxies. Bound now so info files exist at
   // session start regardless of whether `--flutter` was passed.
   final runMode = runModeFromServerArgs(serverArgs.value);
@@ -937,15 +999,14 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     serverPubspecFile: serverPubspecFile,
     serverPackageDirectoryPathParts: config.serverPackageDirectoryPathParts,
     onReady: (app, url) =>
-        runnerEvents?.recordFlutterAppState(app.id, running: true, url: url),
+        runnerApi.recordFlutterAppState(app.id, running: true, url: url),
     onStart: (app, process) => _recordExtensionEvents(
       process.vmService,
       (event) => logHistory.recordFlutterExtensionEvent(app.id, event),
     ),
-    onStop: (app) =>
-        runnerEvents?.recordFlutterAppState(app.id, running: false),
+    onStop: (app) => runnerApi.recordFlutterAppState(app.id, running: false),
     onLaunchFailed: (app) =>
-        runnerEvents?.recordFlutterAppState(app.id, running: false),
+        runnerApi.recordFlutterAppState(app.id, running: false),
     onLog: (app, event) => logHistory.recordFlutterLogEvent(app.id, event),
     stdoutSinkFor: (app) =>
         logHistory.flutterOutputSink(app.id, forwardTo: flutterStdoutEcho),
@@ -976,7 +1037,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       logHistory.recordServerLogEvent,
     );
     logHistory.markServerStructuredLogging();
-    runnerEvents?.setStage(RunnerStage.running);
+    runnerApi.setStage(RunnerStage.running);
     proxy = await _mountOrRetargetProxy(
       serverProcess: serverProcess,
       existing: proxy,
@@ -1072,7 +1133,10 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     flutterManager: flutterManager,
     flutterAppsLoader: () async {
       await flutterManager.loadApps();
-      runnerEvents?.recordFlutterApps(flutterManager.apps.toList());
+      runnerApi.recordFlutterApps(flutterManager.apps.toList());
+
+      // The stack changed what the runner can answer, not only what it is doing.
+      attachSocket?.refreshSnapshot();
       setupFileWatcher();
     },
     applyMigrationsAction: () => _applyMigrationsForSession(
@@ -1089,20 +1153,27 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   // point only ever has to await [shutdown.future]
   unawaited(session.done.then(shutdown.complete));
 
-  final runnerApi = LocalRunnerApi(
+  runnerApi.bindStack(
     session: session,
     flutterManager: flutterManager,
-    logHistory: logHistory,
     config: config,
     runMode: runMode,
     vmServiceUri: () => proxy?.httpUri.toString(),
-    requestShutdown: shutdown.complete,
-    watchModeEnabled: watch,
   );
-  runnerEvents = runnerApi;
+
   runnerApi.setStage(
     session.isRunning ? RunnerStage.running : RunnerStage.degraded,
   );
+  runnerApi.recordFlutterApps(flutterManager.apps.toList());
+
+  // The stack changed what the runner can answer, not only what it is doing.
+  attachSocket?.refreshSnapshot();
+
+  if (attachSocket != null && launchFlutterApp) {
+    attachSocket.onFirstClientAttached = () => unawaited(
+      session.launchAutoLaunchApps(),
+    );
+  }
 
   // Start MCP socket server for AI agent integration.
   McpSocketServer? mcpSocket = McpSocketServer(serverDir: serverDir);
@@ -1113,21 +1184,6 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   } on SocketException catch (e) {
     log.warning('Failed to start MCP server: $e');
     mcpSocket = null;
-  }
-
-  // Start the attach socket, which a terminal UI or a plain log stream reads.
-  RunnerSocketServer? attachSocket = RunnerSocketServer(serverDir: serverDir);
-  try {
-    await attachSocket.start();
-    attachSocket.connect(runnerApi);
-    if (launchFlutterApp) {
-      attachSocket.onFirstClientAttached = () => unawaited(
-        session.launchAutoLaunchApps(),
-      );
-    }
-  } on SocketException catch (e) {
-    log.warning('Failed to start the attach server: $e');
-    attachSocket = null;
   }
 
   setupFileWatcher();

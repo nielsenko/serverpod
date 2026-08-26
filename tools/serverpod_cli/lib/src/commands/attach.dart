@@ -98,11 +98,18 @@ class AttachCommand extends ServerpodCommand<AttachOption> {
 /// what they do with it, including what they say when it turns out not to
 /// answer: a runner resolves and then goes away between the two, and an
 /// unhandled [RunnerUnreachableException] would report that as a crash.
-Future<int> attachTo(String socketPath, {required bool useTui}) async {
+///
+/// [waitForRunner] bounds how long a refused connection is retried, for a
+/// caller that has just brought the runner up and knows the socket is coming.
+Future<int> attachTo(
+  String socketPath, {
+  required bool useTui,
+  Duration? waitForRunner,
+}) async {
   try {
     return useTui
-        ? await attachWithTui(socketPath)
-        : await attachWithLogStream(socketPath);
+        ? await attachWithTui(socketPath, waitForRunner: waitForRunner)
+        : await attachWithLogStream(socketPath, waitForRunner: waitForRunner);
   } on RunnerUnreachableException catch (e) {
     log.error('$e');
     throw ExitException.error();
@@ -139,13 +146,13 @@ String requireAttachSocket(RunnerManifest manifest) {
 /// with the backend in another process there is no [Completer] handing state
 /// back, no logger buffering messages emitted before the UI existed, and no
 /// ordering dance to print a crash after the alternate screen is gone.
-Future<int> attachWithTui(String socketPath) async {
+Future<int> attachWithTui(String socketPath, {Duration? waitForRunner}) async {
   final holder = StartAppStateHolder(ServerWatchState());
   final client = RunnerClient(
     socketPath: socketPath,
     history: holder.state.history,
   );
-  await client.attach();
+  await client.attach(waitFor: waitForRunner);
 
   final exitCompleter = Completer<int>();
   void requestExit([int code = 0]) {

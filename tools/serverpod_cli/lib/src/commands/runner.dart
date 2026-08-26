@@ -19,6 +19,7 @@ import 'package:serverpod_cli/src/runner/runner_log_file.dart';
 import 'package:serverpod_cli/src/runner/runner_manifest.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_logging_cli/serverpod_logging_cli.dart';
+import 'package:serverpod_shared/log.dart' show MultiLogWriter;
 
 /// The commands that act on the development stack: the runner itself, and the
 /// clients that drive one.
@@ -144,9 +145,10 @@ class RunnerStartCommand extends ServerpodCommand<RunnerStartOption> {
       ),
       // Nothing renders here, whatever a later client chooses to do.
       useTui: false,
+      awaitManifest: true,
     );
 
-    log.info('Runner ready (pid ${manifest.pid}).');
+    log.info('Runner ready (pid ${manifest!.pid}).');
     log.info(
       'Attach with `serverpod runner attach`, '
       'stop with `serverpod runner stop`.',
@@ -260,10 +262,18 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
     // spawning CLI names empty. `serverpod start`, the only caller that
     // detaches, always passes the directory it spawned the runner for.
     final logFile = RunnerLogFile.forServer(directory);
+    final logHistory = StartLogHistory();
     if (detached) {
       await logFile.open();
       await closeLogger();
-      initializeLoggerWith(ServerpodCliLogger(RunnerLogFileWriter(logFile)));
+      initializeLoggerWith(
+        ServerpodCliLogger(
+          MultiLogWriter([
+            StartLogHistoryWriter(logHistory),
+            RunnerLogFileWriter(logFile),
+          ]),
+        ),
+      );
     }
 
     final config = await GeneratorConfig.load(
@@ -282,11 +292,15 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
         docker: commandConfig.optionalValue(RunnerServeOption.docker),
         launchFlutterApp: commandConfig.value(RunnerServeOption.flutter),
         shutdown: shutdown,
-        logHistory: StartLogHistory(),
-        serverStdoutSink: detached ? RunnerLogFileSink(logFile) : null,
-        serverStderrSink: detached
-            ? RunnerLogFileSink(logFile, prefix: 'stderr: ')
-            : null,
+        logHistory: logHistory,
+        serverStdoutSink: logHistory.serverOutputSink(
+          forwardTo: detached ? RunnerLogFileSink(logFile) : stdout,
+        ),
+        serverStderrSink: logHistory.serverOutputSink(
+          forwardTo: detached
+              ? RunnerLogFileSink(logFile, prefix: 'stderr: ')
+              : stderr,
+        ),
         flutterStdoutEcho: detached
             ? RunnerLogFileSink(logFile, prefix: 'flutter: ')
             : stdout,
@@ -297,7 +311,6 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
 
       switch (result) {
         case WatchLoopAborted(:final exitCode):
-          if (detached) await logFile.close();
           if (exitCode != 0) throw ExitException(exitCode);
           return;
         case WatchLoopReady(:final ctx):
@@ -305,11 +318,11 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
           final exitCode = await shutdown.future;
           log.info('Server stopped (exitCode: $exitCode).');
           await ctx.dispose(exitCode: exitCode);
-          if (detached) await logFile.close();
           if (exitCode != 0) throw ExitException(exitCode);
       }
     } finally {
       shutdown.dispose();
+      if (detached) await logFile.close();
     }
   }
 }

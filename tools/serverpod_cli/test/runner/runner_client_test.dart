@@ -195,6 +195,35 @@ void main() {
     );
 
     test(
+      'when the runner behind the socket is swapped, '
+      'then the client replaces the scalars its first snapshot carried.',
+      () async {
+        runner
+          ..stage = RunnerStage.starting
+          ..isRunning = false
+          ..canLaunchFlutterApps = false;
+
+        final client = RunnerClient(socketPath: server.socketPath);
+        addTearDown(client.close);
+        await client.attach();
+        expect(client.canLaunchFlutterApps, isFalse);
+
+        final replaced = expectLater(client.snapshotChanges, emits(anything));
+        final started = FakeRunnerApi()
+          ..stage = RunnerStage.running
+          ..canLaunchFlutterApps = true
+          ..flutterAppIds = ['admin'];
+        addTearDown(started.eventController.close);
+        server.connect(started);
+        await replaced;
+
+        expect(client.canLaunchFlutterApps, isTrue);
+        expect(client.stage, RunnerStage.running);
+        expect(client.flutterApps.single.id, 'admin');
+      },
+    );
+
+    test(
       'when a client only connects to issue a command, '
       'then it asks for no snapshot, so it does not count as a UI.',
       () async {

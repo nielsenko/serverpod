@@ -13,6 +13,13 @@ const runnerSnapshotMethod = 'snapshot';
 /// The JSON-RPC notification the runner pushes events on.
 const runnerEventNotification = 'event';
 
+/// The JSON-RPC notification the runner pushes a replacement snapshot on.
+///
+/// Sent when the runner behind this socket is swapped, not on every change:
+/// events carry those. A client applies it the way it applies the snapshot it
+/// asked for on connect - wholesale.
+const runnerSnapshotNotification = 'snapshotChanged';
+
 /// Serves the attach protocol on `<serverDir>/.dart_tool/serverpod/tui.sock`.
 ///
 /// JSON-RPC 2.0, line-delimited, over a Unix socket, reusing the framing the
@@ -48,7 +55,20 @@ class RunnerSocketServer {
   /// and disconnect without saying a word, and launching Flutter apps for one
   /// of those is launching them for nobody. Every real client opens with the
   /// snapshot.
-  void Function()? onFirstClientAttached;
+  ///
+  /// Assigned after the fact: the socket is bound before there is a stack to
+  /// launch anything against, so a UI can attach during startup and this is
+  /// wired only once the session exists. Assigning it when a client has
+  /// already arrived runs it straight away, otherwise auto-launch would be
+  /// skipped for exactly the developer who was watching from the start.
+  void Function()? get onFirstClientAttached => _onFirstClientAttached;
+
+  set onFirstClientAttached(void Function()? callback) {
+    _onFirstClientAttached = callback;
+    if (_hadClient) callback?.call();
+  }
+
+  void Function()? _onFirstClientAttached;
 
   ServerSocket? _serverSocket;
   RunnerApi? _runner;
@@ -73,17 +93,39 @@ class RunnerSocketServer {
   void connect(RunnerApi runner) {
     _runner = runner;
     _eventSub?.cancel();
-    _eventSub = runner.events.listen((event) {
-      if (_peers.isEmpty) return;
-      final payload = event.toJson();
-      for (final peer in _peers.toList()) {
-        try {
-          peer.sendNotification(runnerEventNotification, payload);
-        } on StateError {
-          _peers.remove(peer);
-        }
+    _eventSub = runner.events.listen(
+      (event) => _broadcast(runnerEventNotification, event.toJson),
+    );
+    refreshSnapshot();
+  }
+
+  /// Hands every attached client the runner's current snapshot.
+  ///
+  /// Needed when a scalar changes that no event announces. A client that
+  /// attached during startup was told the stage, whether apps can be launched
+  /// and which apps exist for a runner that had no stack yet; events announce
+  /// changes rather than capabilities, so nothing later would correct them.
+  void refreshSnapshot() {
+    final runner = _runner;
+    if (runner == null) return;
+    _broadcast(runnerSnapshotNotification, () => runner.snapshot().toJson());
+  }
+
+  /// Sends [method] to every attached client.
+  ///
+  /// [payload] is built only when there is someone to send it to: with
+  /// `--no-attach` there is never a peer, and the runner is expected to stay
+  /// up for days.
+  void _broadcast(String method, Map<String, Object?> Function() payload) {
+    if (_peers.isEmpty) return;
+    final params = payload();
+    for (final peer in _peers.toList()) {
+      try {
+        peer.sendNotification(method, params);
+      } on StateError {
+        _peers.remove(peer);
       }
-    });
+    }
   }
 
   /// Closes the socket and every attached client.
@@ -150,7 +192,7 @@ class RunnerSocketServer {
       _peers.add(peer);
       if (!_hadClient) {
         _hadClient = true;
-        onFirstClientAttached?.call();
+        _onFirstClientAttached?.call();
       }
       return _withRunner((runner) => runner.snapshot().toJson());
     });
