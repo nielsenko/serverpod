@@ -25,7 +25,7 @@ Map<String, Object?> encodeLogHistoryItem(Object item) {
       'scope': {'id': item.scope.id, 'label': item.scope.label},
       if (item.error != null) 'error': item.error.toString(),
       if (item.stackTrace != null) 'stackTrace': item.stackTrace.toString(),
-      if (item.metadata != null) 'metadata': item.metadata,
+      if (item.metadata != null) 'metadata': ?_jsonSafeMap(item.metadata),
     };
   }
   if (item is CompletedOperation) {
@@ -39,6 +39,30 @@ Map<String, Object?> encodeLogHistoryItem(Object item) {
   }
   return {'type': 'unknown', 'value': item.toString()};
 }
+
+/// [metadata] with every value reduced to something `jsonEncode` accepts, or
+/// null when nothing survives.
+///
+/// Metadata is an open map: the CLI logger stashes a `LogType` in it, and the
+/// pod and Flutter apps put their own objects there. One non-encodable value
+/// would otherwise throw out of the JSON-RPC layer and take the whole attach
+/// connection down, so anything unrecognized is carried as its `toString()`
+/// rather than dropping the entry or the connection.
+Map<String, Object?>? _jsonSafeMap(Map<String, Object?>? metadata) {
+  if (metadata == null || metadata.isEmpty) return null;
+  return {
+    for (final entry in metadata.entries) entry.key: _jsonSafe(entry.value),
+  };
+}
+
+Object? _jsonSafe(Object? value) => switch (value) {
+  null || bool() || num() || String() => value,
+  final List<Object?> list => [for (final item in list) _jsonSafe(item)],
+  final Map<Object?, Object?> map => {
+    for (final entry in map.entries) '${entry.key}': _jsonSafe(entry.value),
+  },
+  _ => value.toString(),
+};
 
 /// Decodes what [encodeLogHistoryItem] produced, or `null` for an entry this
 /// client does not understand.

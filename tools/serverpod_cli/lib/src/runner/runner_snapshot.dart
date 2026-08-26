@@ -38,7 +38,9 @@ class RunnerSnapshot {
     required this.stage,
     required this.isRunning,
     required this.watchModeEnabled,
+    required this.canLaunchFlutterApps,
     required this.serverEntries,
+    required this.serverLines,
     required this.activeOperations,
     required this.flutterLines,
     required this.flutterApps,
@@ -57,13 +59,16 @@ class RunnerSnapshot {
     required RunnerStage stage,
     required bool isRunning,
     required bool watchModeEnabled,
+    required bool canLaunchFlutterApps,
     required List<FlutterAppConfig> flutterApps,
     required Set<String> runningFlutterApps,
   }) => RunnerSnapshot(
     stage: stage,
     isRunning: isRunning,
     watchModeEnabled: watchModeEnabled,
+    canLaunchFlutterApps: canLaunchFlutterApps,
     serverEntries: history.serverEntries.toList(),
+    serverLines: history.serverLines.toList(),
     activeOperations: [
       for (final entry in history.activeOperations.entries)
         (
@@ -83,9 +88,18 @@ class RunnerSnapshot {
   final bool isRunning;
   final bool watchModeEnabled;
 
+  /// Whether launching a Flutter app can do anything, which it cannot outside
+  /// development. Decided by the runner: only it knows the run mode the stack
+  /// was started with, and a client that guesses offers a key that silently
+  /// does nothing.
+  final bool canLaunchFlutterApps;
+
   /// The retained server history, oldest first: log entries and completed
   /// operations, as [encodeLogHistoryItem] writes them.
   final List<Object> serverEntries;
+
+  /// The pod's retained raw output lines, oldest first.
+  final List<String> serverLines;
 
   /// Operations that have started and not finished, with the time each began
   /// so a client can show how long one it did not witness has been running.
@@ -105,6 +119,8 @@ class RunnerSnapshot {
     'stage': stage.name,
     'isRunning': isRunning,
     'watchModeEnabled': watchModeEnabled,
+    'canLaunchFlutterApps': canLaunchFlutterApps,
+    'serverLines': serverLines,
     'serverEntries': [
       for (final entry in serverEntries) encodeLogHistoryItem(entry),
     ],
@@ -123,6 +139,10 @@ class RunnerSnapshot {
     stage: RunnerStage.byName(json['stage'] as String?),
     isRunning: json['isRunning'] as bool? ?? false,
     watchModeEnabled: json['watchModeEnabled'] as bool? ?? false,
+    canLaunchFlutterApps: json['canLaunchFlutterApps'] as bool? ?? false,
+    serverLines: [
+      for (final line in json['serverLines'] as List? ?? const []) '$line',
+    ],
     serverEntries: [
       for (final entry in _list(json['serverEntries']))
         ?decodeLogHistoryItem(entry),

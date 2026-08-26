@@ -53,6 +53,11 @@ class WatchLoopContext {
   final Future<void> Function() closeAnalyzers;
   final Future<void> Function()? stopDocker;
   final void Function() stopFileWatcher;
+
+  /// Announces that the stack is going away on purpose. Setting the stage is
+  /// the runner's own capability rather than part of [RunnerApi], which is
+  /// what a *client* can ask for.
+  final void Function()? announceStopping;
   final String vmServiceInfoFile;
 
   /// Keeps `runner.json` current, and removes it on dispose. Null in tests
@@ -75,6 +80,7 @@ class WatchLoopContext {
     required this.closeAnalyzers,
     required this.stopDocker,
     required this.stopFileWatcher,
+    this.announceStopping,
     required this.vmServiceInfoFile,
     this.manifestPublisher,
     this.lock,
@@ -87,6 +93,10 @@ class WatchLoopContext {
     if (_disposed) return;
     _disposed = true;
     stopFileWatcher();
+    // Announced before the sockets go, so an attached client learns the stack
+    // is going away on purpose rather than only seeing its connection drop -
+    // which is indistinguishable from a crash it should reconnect after.
+    announceStopping?.call();
     await mcpSocket?.close();
     await attachSocket?.close();
     // After both sockets, so no client is served from buffers that are being

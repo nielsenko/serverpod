@@ -30,6 +30,7 @@ sealed class RunnerEvent {
           decodeLogHistoryItem({...json, 'type': 'operation'})
               as CompletedOperation,
         ),
+        'serverLine' => ServerLineEvent(json['line'] as String? ?? ''),
         'flutterLine' => FlutterLineEvent(
           appId: json['appId'] as String? ?? '',
           line: json['line'] as String? ?? '',
@@ -100,6 +101,16 @@ final class OperationCompletedEvent extends RunnerEvent {
     // routes this on the far side.
     'event': 'operationCompleted',
   };
+}
+
+/// A raw output line the pod printed.
+final class ServerLineEvent extends RunnerEvent {
+  const ServerLineEvent(this.line);
+
+  final String line;
+
+  @override
+  Map<String, Object?> toJson() => {'event': 'serverLine', 'line': line};
 }
 
 /// A raw output line from a Flutter app.

@@ -81,6 +81,13 @@ abstract interface class RunnerApi {
   /// Id-keyed throughout: tab indices belong to the UI, not to the runner.
   List<FlutterAppConfig> get flutterApps;
 
+  /// Whether launching one of [flutterApps] can do anything.
+  ///
+  /// False outside development, where the launcher declines. Reported rather
+  /// than left for a client to infer, so a UI does not offer a key that
+  /// silently does nothing.
+  bool get canLaunchFlutterApps;
+
   /// Whether [appId] is running.
   bool isFlutterAppRunning(String appId);
 

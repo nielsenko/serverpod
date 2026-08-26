@@ -20,6 +20,11 @@ class FakeRunnerApi implements RunnerApi {
 
   bool watchModeEnabled = true;
 
+  @override
+  bool canLaunchFlutterApps = true;
+
+  List<String> serverLines = const [];
+
   final StreamController<RunnerEvent> eventController =
       StreamController<RunnerEvent>.broadcast();
 
@@ -37,6 +42,8 @@ class FakeRunnerApi implements RunnerApi {
     stage: stage,
     isRunning: isRunning,
     watchModeEnabled: watchModeEnabled,
+    canLaunchFlutterApps: canLaunchFlutterApps,
+    serverLines: serverLines,
     serverEntries: logHistory,
     activeOperations: activeOperations,
     flutterLines: flutterLogs,

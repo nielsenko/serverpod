@@ -108,6 +108,7 @@ class LocalRunnerApi implements RunnerApi {
     stage: _stage,
     isRunning: isRunning,
     watchModeEnabled: _watchModeEnabled,
+    canLaunchFlutterApps: canLaunchFlutterApps,
     flutterApps: flutterApps,
     runningFlutterApps: {
       for (final app in flutterApps)
@@ -197,6 +198,9 @@ class LocalRunnerApi implements RunnerApi {
   @override
   bool isFlutterAppLaunching(String appId) =>
       _flutterManager.isLaunching(appId);
+
+  @override
+  bool get canLaunchFlutterApps => _flutterManager.canLaunchApps;
 
   @override
   bool get isAnyFlutterAppRunning => _session.isFlutterAppRunning;

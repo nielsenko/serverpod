@@ -1015,6 +1015,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       mcpSocket: mcpSocket,
       attachSocket: attachSocket,
       closeAnalyzers: closeAnalyzers,
+      announceStopping: () => runnerApi.setStage(RunnerStage.stopping),
       stopFileWatcher: () => fileChangeSub?.cancel(),
       stopDocker: startedDocker ? () => _stopDockerServices(serverDir) : null,
       vmServiceInfoFile: vmServiceInfoFile,

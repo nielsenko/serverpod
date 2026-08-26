@@ -25,6 +25,18 @@ class StartLogHistory {
   /// Maximum number of raw output lines kept per Flutter app.
   static const maxFlutterLines = 10000;
 
+  /// Maximum number of raw server output lines kept.
+  static const maxServerLines = 10000;
+
+  /// The pod's raw stdout and stderr, oldest first, ANSI-free.
+  ///
+  /// Separate from [serverEntries]: those are structured entries the pod
+  /// reports over its VM service, while this is what it actually printed -
+  /// which is the only place a crash before the VM service is up shows at all.
+  final BoundedQueueList<String> serverLines = BoundedQueueList<String>(
+    maxServerLines,
+  );
+
   /// Structured server history, oldest first: [LogEntry] from the pod's
   /// `ext.serverpod.log` events, [CompletedOperation] for finished server
   /// scopes and CLI actions.
@@ -56,6 +68,9 @@ class StartLogHistory {
   /// extension events, after its flattened text has been added to the app's
   /// line buffer.
   void Function(String appId, LogEntry entry)? onFlutterEntry;
+
+  /// Called for each raw server output line appended to [serverLines].
+  void Function(String line)? onServerLine;
 
   /// When each of [activeOperations] began, so a client attaching mid-operation
   /// can tell how long it has been running. [TrackedOperation] measures with a
@@ -96,6 +111,20 @@ class StartLogHistory {
     onChanged?.call();
   }
 
+  /// Appends [line] to the pod's raw output.
+  void addServerLine(String line) {
+    serverLines.add(line);
+    _emit(ServerLineEvent(line));
+    onServerLine?.call(line);
+    onChanged?.call();
+  }
+
+  /// An [IOSink] that records everything written to it as the pod's raw
+  /// output, optionally passing the original writes on to [forwardTo] - the
+  /// terminal in a foreground session, the runner's log file when detached.
+  IOSink serverOutputSink({IOSink? forwardTo}) =>
+      _LineSink(addServerLine, forwardTo);
+
   /// An [IOSink] that records everything written to it as raw output lines of
   /// the Flutter app [appId].
   ///
@@ -103,7 +132,7 @@ class StartLogHistory {
   /// the real stdout/stderr outside the TUI; under the TUI it is null, since
   /// the TUI owns the terminal and renders the recorded lines itself.
   IOSink flutterOutputSink(String appId, {IOSink? forwardTo}) =>
-      _FlutterOutputSink(this, appId, forwardTo);
+      _LineSink((line) => addFlutterLine(appId, line), forwardTo);
 
   /// Records an `ext.serverpod.log` event posted by the pod over its VM
   /// service. Other extension events are ignored.
@@ -226,12 +255,58 @@ class StartLogHistory {
     onChanged?.call();
   }
 
+  /// Records a log entry the CLI itself produced, as opposed to one the pod
+  /// reported over its VM service.
+  ///
+  /// The two share [serverEntries] because a reader wants one chronological
+  /// account: "generating code", "compilation failed" and the pod's own
+  /// startup lines are one story, and the CLI half is the half that explains
+  /// why a stack never came up.
+  void recordCliLogEntry(LogEntry entry) {
+    serverEntries.add(entry);
+    _emit(ServerLogEvent(entry));
+    onServerEntry?.call(entry);
+    onChanged?.call();
+  }
+
+  /// Records the start of a CLI operation - a `log.progress` scope - so a
+  /// client attaching mid-flight sees it running rather than nothing at all.
+  void startCliOperation(String id, String label) {
+    final operation = TrackedOperation(id: id, label: label);
+    final startedAt = DateTime.now();
+    activeOperations[id] = operation;
+    operationStartTimes[id] = startedAt;
+    _emit(OperationStartedEvent(operation, startedAt: startedAt));
+    onChanged?.call();
+  }
+
+  /// Records the end of the CLI operation [id], if it is still open.
+  void completeCliOperation(
+    String id, {
+    required bool success,
+    required Duration duration,
+  }) {
+    final operation = activeOperations.remove(id);
+    operationStartTimes.remove(id);
+    if (operation == null) return;
+    operation.stopwatch.stop();
+    final completed = CompletedOperation(
+      label: operation.label,
+      success: success,
+      duration: duration,
+    );
+    serverEntries.add(completed);
+    _emit(OperationCompletedEvent(completed));
+    onChanged?.call();
+  }
+
   /// Drops every retained server entry and Flutter line.
   ///
   /// In-progress [activeOperations] are kept so a running hot reload or
   /// migration still completes into the cleared history.
   void clear() {
     serverEntries.clear();
+    serverLines.clear();
     for (final lines in _flutterLines.values) {
       lines.clear();
     }
@@ -250,7 +325,12 @@ class StartLogHistory {
       if (raw.isNotEmpty) raw.writeln();
       raw.write(entry.stackTrace);
     }
-    flutterLinesFor(appId).addAll(stripAnsi(raw.toString()).split('\n'));
+    for (final line in stripAnsi(raw.toString()).split('\n')) {
+      // Through [addFlutterLine] rather than straight into the buffer: a
+      // client that never sees the line has a buffer that silently diverges
+      // from the runner's until the next reconnect replaces it wholesale.
+      addFlutterLine(appId, line);
+    }
   }
 }
 
@@ -305,14 +385,16 @@ LogEntry _logEntryFromEventData(
   );
 }
 
-/// [IOSink] that splits what is written to it into ANSI-free lines and records
-/// them as raw output of one Flutter app, optionally passing the original
-/// writes on to another sink unchanged.
-class _FlutterOutputSink implements IOSink {
-  _FlutterOutputSink(this._history, this._appId, this._forwardTo);
+/// [IOSink] that splits what is written to it into ANSI-free lines and hands
+/// each to [_onLine], optionally passing the original writes on to another
+/// sink unchanged.
+///
+/// One implementation for the pod's output and every Flutter app's: what
+/// differs between them is only where the finished lines go.
+class _LineSink implements IOSink {
+  _LineSink(this._onLine, this._forwardTo);
 
-  final StartLogHistory _history;
-  final String _appId;
+  final void Function(String line) _onLine;
   final IOSink? _forwardTo;
   final StringBuffer _lineBuffer = StringBuffer();
 
@@ -342,10 +424,8 @@ class _FlutterOutputSink implements IOSink {
 
   @override
   void addError(Object error, [StackTrace? stackTrace]) {
-    _history.addFlutterLine(_appId, stripAnsi('ERROR: $error'));
-    if (stackTrace != null) {
-      _history.addFlutterLine(_appId, stripAnsi('$stackTrace'));
-    }
+    _onLine(stripAnsi('ERROR: $error'));
+    if (stackTrace != null) _onLine(stripAnsi('$stackTrace'));
     _forwardTo?.addError(error, stackTrace);
   }
 
@@ -385,7 +465,40 @@ class _FlutterOutputSink implements IOSink {
   }
 
   void _emitLine() {
-    _history.addFlutterLine(_appId, stripAnsi(_lineBuffer.toString()));
+    _onLine(stripAnsi(_lineBuffer.toString()));
     _lineBuffer.clear();
   }
+}
+
+/// A [LogWriter] that folds the CLI's own logging into a [StartLogHistory].
+///
+/// Without this the runner's `log.*` calls reach only its log file, and an
+/// attached client shows the pod's output with nothing around it: no
+/// generation errors, no compile failures, no progress for the minutes a cold
+/// start takes. The in-process terminal UI used to get this by owning the
+/// logger; a detached runner has to put it somewhere a client can read.
+class StartLogHistoryWriter extends LogWriter {
+  StartLogHistoryWriter(this._history);
+
+  final StartLogHistory _history;
+
+  @override
+  Future<void> log(LogEntry entry) async => _history.recordCliLogEntry(entry);
+
+  @override
+  Future<void> openScope(LogScope scope) async =>
+      _history.startCliOperation(scope.id, scope.label);
+
+  @override
+  Future<void> closeScope(
+    LogScope scope, {
+    required bool success,
+    required Duration duration,
+    Object? error,
+    StackTrace? stackTrace,
+  }) async => _history.completeCliOperation(
+    scope.id,
+    success: success,
+    duration: duration,
+  );
 }
