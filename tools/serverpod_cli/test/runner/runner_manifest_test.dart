@@ -124,6 +124,43 @@ void main() {
     );
 
     test(
+      'when an invocation asks for Docker and the runner started without it, '
+      'then it names the option.',
+      () {
+        const asked = RunnerConfig(
+          watch: true,
+          flutter: true,
+          docker: true,
+          serverArgs: ['--mode', 'production'],
+        );
+
+        expect(running.differencesFrom(asked), ['--docker']);
+      },
+    );
+
+    test(
+      'when an invocation says nothing about Docker, '
+      'then whatever the runner decided is accepted.',
+      () {
+        const asked = RunnerConfig(
+          watch: true,
+          flutter: true,
+          serverArgs: ['--mode', 'production'],
+        );
+
+        expect(
+          const RunnerConfig(
+            watch: true,
+            flutter: true,
+            docker: true,
+            serverArgs: ['--mode', 'production'],
+          ).differencesFrom(asked),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
       'when an invocation asks for different server arguments, '
       'then it names them.',
       () {

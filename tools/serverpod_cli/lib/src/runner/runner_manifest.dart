@@ -227,17 +227,31 @@ class RunnerConfig {
     required this.watch,
     required this.flutter,
     required this.serverArgs,
+    this.docker,
   });
 
   final bool watch;
   final bool flutter;
   final List<String> serverArgs;
 
+  /// Whether Docker Compose services are part of this stack.
+  ///
+  /// Published as what the runner resolved, and null in the configuration an
+  /// invocation asks for when it passed neither `--docker` nor `--no-docker`.
+  /// The default is derived from the project rather than stated, so an
+  /// invocation with no opinion accepts whatever the runner decided; only an
+  /// explicit flag can disagree.
+  final bool? docker;
+
   /// The option names on which this configuration differs from [other], for an
   /// error that names them rather than just refusing.
+  ///
+  /// [other] is what an invocation asked for; this is what the runner is
+  /// serving.
   List<String> differencesFrom(RunnerConfig other) => [
     if (watch != other.watch) '--watch',
     if (flutter != other.flutter) '--flutter',
+    if (other.docker != null && docker != other.docker) '--docker',
     if (!_serverArgsEqual.equals(serverArgs, other.serverArgs))
       'server arguments after --',
   ];
@@ -245,12 +259,14 @@ class RunnerConfig {
   Map<String, Object?> toJson() => {
     'watch': watch,
     'flutter': flutter,
+    if (docker != null) 'docker': docker,
     'serverArgs': serverArgs,
   };
 
   static RunnerConfig fromJson(Map<String, Object?> json) => RunnerConfig(
     watch: json['watch'] as bool? ?? true,
     flutter: json['flutter'] as bool? ?? true,
+    docker: json['docker'] as bool?,
     serverArgs: switch (json['serverArgs']) {
       final List<Object?> args => [for (final arg in args) '$arg'],
       _ => const [],

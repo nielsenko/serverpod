@@ -957,6 +957,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       config: RunnerConfig(
         watch: watch,
         flutter: launchFlutterApp,
+        docker: startDocker,
         serverArgs: serverArgs.value,
       ),
     ),
