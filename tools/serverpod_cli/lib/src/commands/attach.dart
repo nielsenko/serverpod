@@ -113,7 +113,7 @@ Future<int> _attachWithTui(String socketPath) async {
     socketPath: socketPath,
     history: holder.state.history,
   );
-  await client.connect();
+  await client.attach();
 
   final exitCompleter = Completer<int>();
   void requestExit([int code = 0]) {

@@ -21,11 +21,14 @@ Future<int> attachWithLogStream(
 }) async {
   final sink = out ?? stdout;
   final client = RunnerClient(socketPath: socketPath);
-  await client.connect();
+  await client.attach();
 
   // The snapshot first, so a session attached to a runner that has been up for
   // hours starts with what it missed rather than the next line only.
   final snapshot = client.snapshot();
+  for (final line in snapshot.serverLines) {
+    sink.writeln(line);
+  }
   for (final entry in snapshot.serverEntries) {
     sink.writeln(_formatHistoryEntry(entry));
   }
@@ -48,6 +51,12 @@ Future<int> attachWithLogStream(
   final eventSub = client.events.listen((event) {
     final line = _formatEvent(event);
     if (line != null) sink.writeln(line);
+    // The runner said it is going away on purpose, so this session is over.
+    // Without it a `serverpod start --no-tui` in CI reattaches forever after
+    // the stack it was watching has stopped.
+    if (event case StageChangedEvent(stage: RunnerStage.stopping)) {
+      if (!done.isCompleted) done.complete(0);
+    }
   });
 
   final connectionSub = client.connectionChanges.listen((connected) {
@@ -76,6 +85,8 @@ String _stageLine(RunnerStage stage) => switch (stage) {
 
 String? _formatEvent(RunnerEvent event) => switch (event) {
   ServerLogEvent(:final entry) => _formatLogEntry(entry),
+  // The pod's own stdout, already a finished line.
+  ServerLineEvent(:final line) => line,
   FlutterLineEvent(:final appId, :final line) => '[$appId] $line',
   FlutterLogEntryEvent(:final appId, :final entry) =>
     '[$appId] ${_formatLogEntry(entry)}',

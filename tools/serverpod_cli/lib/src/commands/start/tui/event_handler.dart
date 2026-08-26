@@ -27,6 +27,9 @@ extension TuiLogHistory on StartLogHistory {
     // The entry's raw text is already in this history; only the structured
     // copy the app's tab renders is left to add.
     onFlutterEntry = holder.state.addFlutterLogEntry;
+    // What the `S` view shows: the pod's own stdout and stderr, which carry a
+    // crash that happened before its VM service was up.
+    onServerLine = holder.state.rawLines.add;
   }
 }
 

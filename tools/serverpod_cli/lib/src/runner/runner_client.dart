@@ -63,11 +63,20 @@ class RunnerClient implements RunnerApi {
 
   json_rpc.Peer? _peer;
   Socket? _socket;
+
+  /// Whether this client is a UI rather than a one-shot command. Set by
+  /// [attach]; gates both the snapshot request and the reconnect loop.
+  bool _attached = false;
+
+  /// Events received while a snapshot request is in flight, replayed once it
+  /// has been applied. Null when no request is outstanding.
+  List<RunnerEvent>? _heldEvents;
   bool _closed = false;
 
   RunnerStage _stage = RunnerStage.starting;
   bool _isRunning = false;
   bool _watchModeEnabled = false;
+  bool _canLaunchFlutterApps = false;
   List<FlutterAppConfig> _flutterApps = const [];
   Set<String> _runningApps = {};
   final Map<String, String?> _appUrls = {};
@@ -82,13 +91,29 @@ class RunnerClient implements RunnerApi {
   /// The Flutter app URLs seen so far, keyed by app id.
   Map<String, String?> get flutterAppUrls => Map.unmodifiable(_appUrls);
 
-  /// Connects and loads the first snapshot.
+  /// Opens a connection to issue commands on, and nothing more.
+  ///
+  /// No snapshot, no reconnect: `serverpod stop` sends one command and expects
+  /// the runner to go away under it. Asking for the snapshot is what marks a
+  /// client as a UI - it is what arms the Flutter auto-launch - so a command
+  /// that is not a UI must not ask for one.
   ///
   /// Throws [RunnerUnreachableException] when nothing is listening: the first
-  /// attach is the one place a missing runner is worth reporting rather than
-  /// silently retrying.
+  /// connection is the one place a missing runner is worth reporting rather
+  /// than silently retrying.
   Future<void> connect() async {
     if (!await _connectOnce()) throw RunnerUnreachableException(socketPath);
+  }
+
+  /// Connects, loads the first snapshot, and keeps reconnecting for as long as
+  /// this client lives.
+  ///
+  /// What a renderer calls. The snapshot request tells the runner a UI has
+  /// arrived; the reconnect loop is what lets a client outlive a runner
+  /// restart, which a one-shot command has no use for.
+  Future<void> attach() async {
+    _attached = true;
+    await connect();
   }
 
   /// Detaches. Never stops the runner: that is `serverpod stop`, or `⇧+Q`
@@ -130,23 +155,35 @@ class RunnerClient implements RunnerApi {
     // delivers the response.
     unawaited(_listenUntilClosed(peer));
 
-    try {
-      _applySnapshot(
-        RunnerSnapshot.fromJson(
-          Map<String, Object?>.from(
-            await peer.sendRequest(
-                  runnerSnapshotMethod,
-                  const <String, Object?>{},
-                )
-                as Map,
+    if (_attached) {
+      // Events that arrive while the request is in flight are held rather than
+      // applied: the snapshot replaces the buffers wholesale, so anything
+      // applied first would be wiped by a snapshot taken before it happened.
+      final held = <RunnerEvent>[];
+      _heldEvents = held;
+      try {
+        _applySnapshot(
+          RunnerSnapshot.fromJson(
+            Map<String, Object?>.from(
+              await peer.sendRequest(
+                    runnerSnapshotMethod,
+                    const <String, Object?>{},
+                  )
+                  as Map,
+            ),
           ),
-        ),
-      );
-    } catch (_) {
-      // The runner went away between connecting and answering. Treat it as a
-      // failed attach; the reconnect loop takes over.
-      await peer.close();
-      return false;
+        );
+      } catch (_) {
+        // The runner went away between connecting and answering. Treat it as a
+        // failed attach; the reconnect loop takes over.
+        _heldEvents = null;
+        await peer.close();
+        return false;
+      }
+      _heldEvents = null;
+      for (final event in held) {
+        _apply(event);
+      }
     }
 
     // Published only now, so `isConnected` never reports a client whose state
@@ -176,7 +213,7 @@ class RunnerClient implements RunnerApi {
     _peer = null;
     _socket = null;
     if (!_connectionChanges.isClosed) _connectionChanges.add(false);
-    unawaited(_reconnect());
+    if (_attached) unawaited(_reconnect());
   }
 
   Future<void> _reconnect() async {
@@ -193,12 +230,16 @@ class RunnerClient implements RunnerApi {
     _stage = snapshot.stage;
     _isRunning = snapshot.isRunning;
     _watchModeEnabled = snapshot.watchModeEnabled;
+    _canLaunchFlutterApps = snapshot.canLaunchFlutterApps;
     _flutterApps = snapshot.flutterApps;
     _runningApps = {...snapshot.runningFlutterApps};
 
     history.serverEntries
       ..clear()
       ..addAll(snapshot.serverEntries);
+    history.serverLines
+      ..clear()
+      ..addAll(snapshot.serverLines);
     history.activeOperations.clear();
     history.operationStartTimes.clear();
     for (final active in snapshot.activeOperations) {
@@ -214,6 +255,11 @@ class RunnerClient implements RunnerApi {
   }
 
   void _apply(RunnerEvent event) {
+    final held = _heldEvents;
+    if (held != null) {
+      held.add(event);
+      return;
+    }
     switch (event) {
       case ServerLogEvent(:final entry):
         history.serverEntries.add(entry);
@@ -233,6 +279,10 @@ class RunnerClient implements RunnerApi {
           (id, _) => !history.activeOperations.containsKey(id),
         );
         history.serverEntries.add(operation);
+
+      case ServerLineEvent(:final line):
+        history.serverLines.add(line);
+        history.onServerLine?.call(line);
 
       case FlutterLineEvent(:final appId, :final line):
         history.flutterLinesFor(appId).add(line);
@@ -288,6 +338,7 @@ class RunnerClient implements RunnerApi {
     stage: _stage,
     isRunning: _isRunning,
     watchModeEnabled: _watchModeEnabled,
+    canLaunchFlutterApps: _canLaunchFlutterApps,
     flutterApps: _flutterApps,
     runningFlutterApps: _runningApps,
   );
@@ -336,6 +387,9 @@ class RunnerClient implements RunnerApi {
 
   /// Which apps the runner reports as running.
   Set<String> get runningFlutterApps => Set.unmodifiable(_runningApps);
+
+  @override
+  bool get canLaunchFlutterApps => _canLaunchFlutterApps;
 
   /// Whether the runner was started in watch mode.
   ///

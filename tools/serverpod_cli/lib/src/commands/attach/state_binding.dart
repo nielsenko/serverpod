@@ -8,6 +8,7 @@ import 'package:serverpod_cli/src/runner/migration_result.dart';
 import 'package:serverpod_cli/src/runner/runner_client.dart';
 import 'package:serverpod_cli/src/runner/runner_event.dart';
 import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
+import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 
 /// Drives a [ServerWatchState] from an attached [RunnerClient].
 ///
@@ -144,7 +145,15 @@ class RunnerStateBinding {
       final hint = result.abortedForWarnings ? ' $forceHint' : '';
       throw Exception('${result.message}$hint');
     }
-    await client.applyMigrations();
+    // Applying is a follow-up, not part of creating: the migration is written
+    // either way, and reporting the create as failed because the database was
+    // unreachable hides that and loses the retry.
+    try {
+      await client.applyMigrations();
+    } catch (e) {
+      log.error('The migration was created but not applied: $e');
+      log.info('Press A to apply it once the database is reachable.');
+    }
   }
 
   FlutterAppConfig? _appAt(int index) {
@@ -166,6 +175,11 @@ class RunnerStateBinding {
     _state.serverReady = isRunning;
     _state.serverStartable = !isRunning && stage == RunnerStage.degraded;
     _state.showSplash = stage == RunnerStage.starting;
+    // The buffer behind the `S` view, refilled here rather than through the
+    // hook: the lines a snapshot brings predate this client.
+    _state.rawLines
+      ..clear()
+      ..addAll(client.history.serverLines);
     _syncApps(client.flutterApps);
     for (final appId in client.runningFlutterApps) {
       _markAppTab(appId, running: true, url: client.flutterAppUrls[appId]);
@@ -187,6 +201,7 @@ class RunnerStateBinding {
         _markAppTab(appId, running: running, url: url);
 
       case ServerLogEvent() ||
+          ServerLineEvent() ||
           OperationStartedEvent() ||
           OperationCompletedEvent() ||
           FlutterLineEvent() ||
@@ -206,7 +221,9 @@ class RunnerStateBinding {
     }
     _state
       ..launchableApps = apps
-      ..canLaunchApps = apps.isNotEmpty;
+      // Apps are configured and listed in every run mode, but only development
+      // launches them. Offering the key outside it is offering a no-op.
+      ..canLaunchApps = apps.isNotEmpty && client.canLaunchFlutterApps;
     if (apps.isNotEmpty) _state.createAppsTabAreaIfNeeded();
   }
 

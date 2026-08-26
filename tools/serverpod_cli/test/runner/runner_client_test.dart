@@ -58,7 +58,7 @@ void main() {
 
         final client = RunnerClient(socketPath: server.socketPath);
         addTearDown(client.close);
-        await client.connect();
+        await client.attach();
 
         expect(client.stage, RunnerStage.running);
         expect(client.history.serverEntries, hasLength(1));
@@ -77,7 +77,7 @@ void main() {
       () async {
         final client = RunnerClient(socketPath: server.socketPath);
         addTearDown(client.close);
-        await client.connect();
+        await client.attach();
 
         runner.emit(
           ServerLogEvent(
@@ -104,7 +104,7 @@ void main() {
       () async {
         final client = RunnerClient(socketPath: server.socketPath);
         addTearDown(client.close);
-        await client.connect();
+        await client.attach();
 
         runner.emit(
           const StageChangedEvent(RunnerStage.degraded, isRunning: false),
@@ -124,7 +124,7 @@ void main() {
 
         final client = RunnerClient(socketPath: server.socketPath);
         addTearDown(client.close);
-        await client.connect();
+        await client.attach();
 
         await client.hotRestart();
 
@@ -145,7 +145,7 @@ void main() {
 
         final client = RunnerClient(socketPath: server.socketPath);
         addTearDown(client.close);
-        await client.connect();
+        await client.attach();
 
         final result = await client.createMigration();
 
@@ -163,7 +163,7 @@ void main() {
           reconnectDelay: const Duration(milliseconds: 20),
         );
         addTearDown(client.close);
-        await client.connect();
+        await client.attach();
         expect(client.history.serverEntries, isEmpty);
 
         // The runner goes away and a new one takes over the same socket, which
@@ -197,6 +197,23 @@ void main() {
     );
 
     test(
+      'when a client only connects to issue a command, '
+      'then it asks for no snapshot, so it does not count as a UI.',
+      () async {
+        var stopped = false;
+        runner.onStop = () async => stopped = true;
+        final client = RunnerClient(socketPath: server.socketPath);
+        addTearDown(client.close);
+
+        await client.connect();
+        await client.stop();
+
+        expect(stopped, isTrue);
+        expect(runner.snapshotCalls, 0);
+      },
+    );
+
+    test(
       'when nothing is listening, '
       'then the first attach reports it rather than retrying silently.',
       () async {
@@ -206,7 +223,7 @@ void main() {
         addTearDown(client.close);
 
         await expectLater(
-          client.connect(),
+          client.attach(),
           throwsA(isA<RunnerUnreachableException>()),
         );
       },
