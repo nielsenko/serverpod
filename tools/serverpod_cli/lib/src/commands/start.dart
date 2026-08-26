@@ -41,6 +41,7 @@ import 'package:serverpod_cli/src/runner/runner_manifest_publisher.dart';
 import 'package:serverpod_cli/src/runner/runner_paths.dart';
 import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
 import 'package:serverpod_cli/src/runner/runner_socket_server.dart';
+import 'package:serverpod_cli/src/runner/starting_runner_api.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_cli/src/vm_proxy/proxy.dart';
 import 'package:serverpod_cli/src/vm_proxy/serverpod_hooks.dart';
@@ -158,30 +159,43 @@ class StartCommand extends ServerpodCommand<StartOption> {
       serverArgs: argResults?.rest ?? const [],
     );
 
+    final attaching = commandConfig.value(StartOption.attach);
+
     // Idempotent: bring a runner up if there is none, and otherwise go straight
     // to attaching. A caller need not know whether the stack is already up in
     // this worktree; the stack is up when this returns zero.
+    //
+    // Null when this invocation spawned the runner and is about to attach: the
+    // manifest is published once the stack is up, and waiting for it would
+    // mean a blank terminal for the whole of a cold start. The socket lives at
+    // a path derived from the server directory, so attaching does not need it.
     final manifest = await _ensureRunner(
       commandConfig: commandConfig,
       config: config,
       serverDir: serverDir,
       asked: asked,
       docker: commandConfig.optionalValue(StartOption.docker),
+      awaitManifest: !attaching,
     );
 
-    if (!commandConfig.value(StartOption.attach)) {
+    if (!attaching) {
       // The path an agent takes: the address is printed and the command
       // returns, leaving the runner up.
-      log.info('Runner ready (pid ${manifest.pid}).');
+      log.info('Runner ready (pid ${manifest!.pid}).');
       log.info('Attach with `serverpod attach`, stop with `serverpod stop`.');
       return;
     }
 
-    final socketPath = requireAttachSocket(manifest);
+    final socketPath = manifest == null
+        ? serverpodTuiSocketPath(serverDir)
+        : requireAttachSocket(manifest);
     final useTui = commandConfig.value(StartOption.tui) && stdout.hasTerminal;
+    // Only a runner this invocation spawned is worth waiting for; one that was
+    // already up either answers now or is not there.
+    final waitForRunner = manifest == null ? _runnerStartTimeout : null;
     final exitCode = useTui
-        ? await attachWithTui(socketPath)
-        : await attachWithLogStream(socketPath);
+        ? await attachWithTui(socketPath, waitForRunner: waitForRunner)
+        : await attachWithLogStream(socketPath, waitForRunner: waitForRunner);
     if (exitCode != 0) throw ExitException(exitCode);
   }
 
@@ -212,12 +226,13 @@ class StartCommand extends ServerpodCommand<StartOption> {
   /// Fails rather than attaching when a live runner disagrees with what this
   /// invocation asked for. Attaching anyway with a warning would leave a caller
   /// that reads only the exit status believing it got what it asked for.
-  Future<RunnerManifest> _ensureRunner({
+  Future<RunnerManifest?> _ensureRunner({
     required Configuration<StartOption> commandConfig,
     required GeneratorConfig config,
     required String serverDir,
     required RunnerConfig asked,
     required bool? docker,
+    required bool awaitManifest,
   }) async {
     switch (await resolveRunner(serverDir)) {
       case IncompatibleRunner(:final message):
@@ -237,13 +252,19 @@ class StartCommand extends ServerpodCommand<StartOption> {
         }
         return manifest;
 
-      case NoRunner():
+      case NoRunner(:final staleManifest):
+        // A crash leaves the manifest behind, naming the same socket paths the
+        // new runner is about to bind. Removing it first means the wait below
+        // cannot mistake the dead runner's manifest - its pid, its protocol
+        // version - for the one being started.
+        if (staleManifest != null) await RunnerManifest.deleteFrom(serverDir);
         return _spawnRunner(
           commandConfig: commandConfig,
           config: config,
           serverDir: serverDir,
           asked: asked,
           docker: docker,
+          awaitManifest: awaitManifest,
         );
     }
   }
@@ -253,12 +274,13 @@ class StartCommand extends ServerpodCommand<StartOption> {
   /// Detached, because the operating system delivers SIGINT to a whole process
   /// group: a runner spawned in this terminal's group would die on the next
   /// Ctrl+C in it. [ProcessStartMode.detached] puts it in a group of its own.
-  Future<RunnerManifest> _spawnRunner({
+  Future<RunnerManifest?> _spawnRunner({
     required Configuration<StartOption> commandConfig,
     required GeneratorConfig config,
     required String serverDir,
     required RunnerConfig asked,
     required bool? docker,
+    required bool awaitManifest,
   }) async {
     // Fire-and-forget: analytics must never delay session start. Captured here
     // rather than in the runner so a stack is counted once however many clients
@@ -294,6 +316,10 @@ class StartCommand extends ServerpodCommand<StartOption> {
       mode: ProcessStartMode.detached,
     );
 
+    // A caller about to attach does not wait: it connects to the socket the
+    // runner binds early, and watches the stack come up through it.
+    if (!awaitManifest) return null;
+
     final manifest = await _awaitManifest(serverDir);
     if (manifest != null) return manifest;
 
@@ -320,7 +346,7 @@ class StartCommand extends ServerpodCommand<StartOption> {
   /// passes, so the deadline stays as short as a legitimate cold start allows.
   Future<RunnerManifest?> _awaitManifest(
     String serverDir, {
-    Duration timeout = const Duration(minutes: 2),
+    Duration timeout = _runnerStartTimeout,
   }) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
@@ -332,6 +358,13 @@ class StartCommand extends ServerpodCommand<StartOption> {
     return null;
   }
 }
+
+/// How long a freshly spawned runner is given to come up, whether that is
+/// waited out for its manifest or spent retrying its socket.
+///
+/// Long because it covers a cold start: code generation, `docker compose up`
+/// pulling an image, and a first compile.
+const _runnerStartTimeout = Duration(minutes: 2);
 
 /// Constructs a [NativeAssetsBuilder] for the server at [serverDir]. The
 /// builder discovers `package_config.json` itself (walking up to a workspace
@@ -595,6 +628,34 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     return const WatchLoopAborted(1);
   }
 
+  // Bound now rather than once the stack is up. Generation, Docker and the
+  // first compile take the minutes a developer most wants to watch, and a
+  // failure in them ends the runner before the real API ever exists - so a
+  // socket that appears only on success is a socket nobody can attach to when
+  // it matters. It serves [StartingRunnerApi] until there is a stack to drive.
+  // After the lock, so two runners racing cannot both bind: the second would
+  // unlink the first's socket.
+  RunnerSocketServer? attachSocket = RunnerSocketServer(serverDir: serverDir);
+  try {
+    await attachSocket.start();
+    attachSocket.connect(
+      StartingRunnerApi(
+        logHistory: logHistory,
+        requestShutdown: shutdown.complete,
+      ),
+    );
+  } on SocketException catch (e) {
+    log.warning('Failed to start the attach server: $e');
+    attachSocket = null;
+  }
+
+  /// Releases what makes this process the runner for the package: the socket a
+  /// client would otherwise keep reaching, then the lock.
+  Future<void> releaseRunnerHold() async {
+    await attachSocket?.close();
+    await lock.release();
+  }
+
   final serverpodToolDir = serverpodToolDirPath(serverDir);
   final vmServiceInfoFile = p.join(serverpodToolDir, 'vm-service-info.json');
   // The pod always writes its raw VM service URI to a separate file; the
@@ -610,7 +671,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   if (existingUri != null) {
     log.info('Existing server found.');
     log.info('VM service proxy listening on $existingUri');
-    await lock.release();
+    await releaseRunnerHold();
     return const WatchLoopAborted(0);
   }
 
@@ -628,7 +689,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       return dockerStarted != null;
     });
     if (dockerStarted == null) {
-      await lock.release();
+      await releaseRunnerHold();
       return const WatchLoopAborted(1);
     }
     startedDocker = dockerStarted!;
@@ -642,7 +703,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   // exactly where the provisioning it guards is undone.
   Future<void> rollbackProvisioning() async {
     await stopDockerIfStarted();
-    await lock.release();
+    await releaseRunnerHold();
   }
 
   // What the caller actually asked for, captured before the migration hook
@@ -1014,21 +1075,16 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     mcpSocket = null;
   }
 
-  // Start the attach socket, which a terminal UI or a plain log stream reads.
-  RunnerSocketServer? attachSocket = RunnerSocketServer(serverDir: serverDir);
-  try {
-    await attachSocket.start();
-    attachSocket.connect(runnerApi);
-    if (launchFlutterApp) {
-      attachSocket.onFirstClientAttached = () => unawaited(
-        // Serialized behind any in-flight reload or restart, like every other
-        // launch.
-        session.launchAutoLaunchApps(),
-      );
-    }
-  } on SocketException catch (e) {
-    log.warning('Failed to start the attach server: $e');
-    attachSocket = null;
+  // Hand the socket bound at the top of this function the stack it now has.
+  // Clients attached during startup keep their connection and their buffers;
+  // what changes is that commands start working.
+  attachSocket?.connect(runnerApi);
+  if (attachSocket != null && launchFlutterApp) {
+    attachSocket.onFirstClientAttached = () => unawaited(
+      // Serialized behind any in-flight reload or restart, like every other
+      // launch.
+      session.launchAutoLaunchApps(),
+    );
   }
 
   setupFileWatcher();

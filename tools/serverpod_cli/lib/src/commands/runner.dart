@@ -14,6 +14,7 @@ import 'package:serverpod_cli/src/commands/start/watch_loop.dart';
 import 'package:serverpod_cli/src/runner/runner_log_file.dart';
 import 'package:serverpod_cli/src/util/serverpod_cli_logger.dart';
 import 'package:serverpod_logging_cli/serverpod_logging_cli.dart';
+import 'package:serverpod_shared/log.dart' show MultiLogWriter;
 
 /// Options for the hidden `runner` command. Mirrors the stack-shaping half of
 /// `start`; the options that describe a client have no meaning here.
@@ -111,17 +112,29 @@ class RunnerCommand extends ServerpodCommand<RunnerOption> {
     );
     final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
 
-    // Spawned detached there is no stdio to inherit, so this process's output
-    // would be lost; redirect it to the log file before anything can log. Run
-    // in a terminal - debugging the runner, or a test driving it in process -
-    // the ambient logger is left alone and output appears where it is
-    // expected.
     final detached = commandConfig.value(RunnerOption.detached);
     final logFile = RunnerLogFile.forServer(serverDir);
+    // What a client renders. A detached runner's own logging goes in here as
+    // well as to the log file: an attached UI reads these buffers and nothing
+    // else, so without it a generation error, a failed compile and the
+    // progress of a cold start are all invisible to whoever is watching.
+    final logHistory = StartLogHistory();
     if (detached) {
+      // Spawned detached there is no stdio to inherit, so this process's
+      // output would be lost; the log file is the only record of a run nobody
+      // attached to. Run in a terminal - debugging the runner, or a test
+      // driving it in process - the ambient logger is left alone and output
+      // appears where it is expected.
       await logFile.open();
       await closeLogger();
-      initializeLoggerWith(ServerpodCliLogger(RunnerLogFileWriter(logFile)));
+      initializeLoggerWith(
+        ServerpodCliLogger(
+          MultiLogWriter([
+            StartLogHistoryWriter(logHistory),
+            RunnerLogFileWriter(logFile),
+          ]),
+        ),
+      );
     }
 
     final shutdown = ShutdownSignal();
@@ -138,11 +151,18 @@ class RunnerCommand extends ServerpodCommand<RunnerOption> {
         keepOpenOnFailure: commandConfig.value(RunnerOption.watch),
         launchFlutterApp: commandConfig.value(RunnerOption.flutter),
         shutdown: shutdown,
-        logHistory: StartLogHistory(),
-        serverStdoutSink: detached ? RunnerLogFileSink(logFile) : null,
-        serverStderrSink: detached
-            ? RunnerLogFileSink(logFile, prefix: 'stderr: ')
-            : null,
+        logHistory: logHistory,
+        // Recorded as the pod's raw output before being echoed on: it is what
+        // the `S` view renders, and the only place a crash before the pod's VM
+        // service is up shows at all.
+        serverStdoutSink: logHistory.serverOutputSink(
+          forwardTo: detached ? RunnerLogFileSink(logFile) : stdout,
+        ),
+        serverStderrSink: logHistory.serverOutputSink(
+          forwardTo: detached
+              ? RunnerLogFileSink(logFile, prefix: 'stderr: ')
+              : stderr,
+        ),
         flutterStdoutEcho: detached
             ? RunnerLogFileSink(logFile, prefix: 'flutter: ')
             : stdout,
@@ -153,7 +173,6 @@ class RunnerCommand extends ServerpodCommand<RunnerOption> {
 
       switch (result) {
         case WatchLoopAborted(:final exitCode):
-          if (detached) await logFile.close();
           if (exitCode != 0) throw ExitException(exitCode);
           return;
         case WatchLoopReady(:final ctx):
@@ -161,11 +180,15 @@ class RunnerCommand extends ServerpodCommand<RunnerOption> {
           final exitCode = await shutdown.future;
           log.info('Server stopped (exitCode: $exitCode).');
           await ctx.dispose();
-          if (detached) await logFile.close();
           if (exitCode != 0) throw ExitException(exitCode);
       }
     } finally {
       shutdown.dispose();
+      // Closed here rather than on each branch: `openWrite` buffers, and the
+      // paths that skip a close are the ones whose output matters most - an
+      // exception on the way out, or whatever the command runner logs after an
+      // abort. Both would otherwise be buffered and dropped.
+      if (detached) await logFile.close();
     }
   }
 }

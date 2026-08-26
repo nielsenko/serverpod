@@ -6,6 +6,7 @@ import 'package:serverpod_cli/src/runner/runner_client.dart';
 import 'package:serverpod_cli/src/runner/runner_event.dart';
 import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
 import 'package:serverpod_shared/log.dart';
+import 'package:serverpod_tui/serverpod_tui.dart' show CompletedOperation;
 
 /// Streams a runner's output as plain text, for `--no-tui`.
 ///
@@ -19,10 +20,11 @@ Future<int> attachWithLogStream(
   String socketPath, {
   IOSink? out,
   Stream<ProcessSignal>? interrupts,
+  Duration? waitForRunner,
 }) async {
   final sink = out ?? stdout;
   final client = RunnerClient(socketPath: socketPath);
-  await client.attach();
+  await client.attach(waitFor: waitForRunner);
 
   // The snapshot first, so a session attached to a runner that has been up for
   // hours starts with what it missed rather than the next line only.
@@ -93,8 +95,7 @@ String? _formatEvent(RunnerEvent event) => switch (event) {
     '[$appId] ${formatLogEntryLine(entry)}',
   OperationStartedEvent(:final operation) => '... ${operation.label}',
   OperationCompletedEvent(:final operation) =>
-    '${operation.success ? '✓' : '✗'} ${operation.label} '
-        '(${operation.duration.inMilliseconds}ms)',
+    _completedOperationLine(operation),
   StageChangedEvent(:final stage) => _stageLine(stage),
   FlutterAppStateEvent(:final appId, :final running, :final url) =>
     '[$appId] ${running ? 'running${url == null ? '' : ' at $url'}' : 'stopped'}',
@@ -102,8 +103,19 @@ String? _formatEvent(RunnerEvent event) => switch (event) {
   FlutterAppsChangedEvent() || ManifestChangedEvent() => null,
 };
 
+/// One retained history entry as a line, rendered the way the live event for
+/// the same thing is.
+///
+/// [CompletedOperation] has to be named: it carries no meaningful `toString`,
+/// so a replayed backlog printed `Instance of 'CompletedOperation'` where the
+/// live stream showed the operation and its duration.
 String _formatHistoryEntry(Object entry) => switch (entry) {
   LogEntry() => formatLogEntryLine(entry),
+  CompletedOperation() => _completedOperationLine(entry),
   _ => entry.toString(),
 };
+
+String _completedOperationLine(CompletedOperation operation) =>
+    '${operation.success ? '✓' : '✗'} ${operation.label} '
+    '(${operation.duration.inMilliseconds}ms)';
 

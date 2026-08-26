@@ -86,6 +86,16 @@ the runner.
 `serverpod start` attaches by default. `--no-attach` brings the runner up, prints
 its address, and returns, which is the path an agent takes.
 
+An invocation that spawns the runner attaches to it immediately rather than
+waiting for it to come up. The runner binds its attach socket as soon as it
+holds the lock, before generation, Docker and the first compile, so the client
+renders that work as it happens instead of leaving the terminal blank for the
+minutes a cold start takes - and a startup that fails is watched rather than
+reported after a timeout. Until there is a stack, the socket serves the log
+history alone: commands answer that the runner is still starting, except
+`stop`, which has to work on a start that is going nowhere. `--no-attach` still
+waits, since it has nothing to render and the manifest is what it prints.
+
 `--tui` / `--no-tui` keeps its current meaning and selects the renderer. The
 terminal UI is used when `--tui` holds and `stdout.hasTerminal`, and a
 plain-text log stream in the foreground otherwise. `serverpod attach` takes the

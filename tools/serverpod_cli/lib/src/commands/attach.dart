@@ -127,13 +127,13 @@ String requireAttachSocket(RunnerManifest manifest) {
 /// with the backend in another process there is no [Completer] handing state
 /// back, no logger buffering messages emitted before the UI existed, and no
 /// ordering dance to print a crash after the alternate screen is gone.
-Future<int> attachWithTui(String socketPath) async {
+Future<int> attachWithTui(String socketPath, {Duration? waitForRunner}) async {
   final holder = StartAppStateHolder(ServerWatchState());
   final client = RunnerClient(
     socketPath: socketPath,
     history: holder.state.history,
   );
-  await client.attach();
+  await client.attach(waitFor: waitForRunner);
 
   final exitCompleter = Completer<int>();
   void requestExit([int code = 0]) {

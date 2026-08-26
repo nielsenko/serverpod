@@ -45,7 +45,20 @@ class RunnerSocketServer {
   /// and disconnect without saying a word, and launching Flutter apps for one
   /// of those is launching them for nobody. Every real client opens with the
   /// snapshot.
-  void Function()? onFirstClientAttached;
+  ///
+  /// Assigned after the fact: the socket is bound before there is a stack to
+  /// launch anything against, so a UI can attach during startup and this is
+  /// wired only once the session exists. Assigning it when a client has
+  /// already arrived runs it straight away, otherwise auto-launch would be
+  /// skipped for exactly the developer who was watching from the start.
+  void Function()? get onFirstClientAttached => _onFirstClientAttached;
+
+  set onFirstClientAttached(void Function()? callback) {
+    _onFirstClientAttached = callback;
+    if (_hadClient) callback?.call();
+  }
+
+  void Function()? _onFirstClientAttached;
 
   ServerSocket? _serverSocket;
   RunnerApi? _runner;
@@ -143,7 +156,7 @@ class RunnerSocketServer {
     peer.registerMethod(runnerSnapshotMethod, (json_rpc.Parameters _) {
       if (!_hadClient) {
         _hadClient = true;
-        onFirstClientAttached?.call();
+        _onFirstClientAttached?.call();
       }
       return _withRunner((runner) => runner.snapshot().toJson());
     });

@@ -111,9 +111,23 @@ class RunnerClient implements RunnerApi {
   /// What a renderer calls. The snapshot request tells the runner a UI has
   /// arrived; the reconnect loop is what lets a client outlive a runner
   /// restart, which a one-shot command has no use for.
-  Future<void> attach() async {
+  /// [waitFor] bounds how long to keep retrying the first connection, for a
+  /// caller that has just spawned a runner and knows the socket is coming.
+  /// Without it a missing runner is reported at once.
+  Future<void> attach({Duration? waitFor}) async {
     _attached = true;
-    await connect();
+    if (waitFor == null) {
+      await connect();
+      return;
+    }
+    final deadline = DateTime.now().add(waitFor);
+    while (!await _connectOnce()) {
+      if (_closed) return;
+      if (DateTime.now().isAfter(deadline)) {
+        throw RunnerUnreachableException(socketPath);
+      }
+      await Future<void>.delayed(_reconnectDelay);
+    }
   }
 
   /// Detaches. Never stops the runner: that is `serverpod stop`, or `⇧+Q`
