@@ -451,11 +451,16 @@ class FlutterAppManager {
 
   /// The `--dart-define` assignments telling an app where the pod is.
   ///
+  /// `SERVER_URL` because that is the one `getServerUrl` in `serverpod_flutter`
+  /// reads, ahead of `assets/config.json` and its `http://localhost:8080/`
+  /// default - so this reaches an app built from the templates without the app
+  /// having to know the runner exists.
+  ///
   /// Empty until the pod has reported an address, so an app launched before
   /// then falls back to whatever its own configuration says.
   List<String> serverUrlDefines() {
     final url = resolvedApiUrl;
-    return url == null ? const [] : ['SERVERPOD_API_URL=$url'];
+    return url == null ? const [] : ['SERVER_URL=$url'];
   }
 
   /// Arms auto-launch and launches every configured app flagged
