@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/analyzer.dart';
 import 'package:serverpod_cli/src/commands/attach.dart';
 import 'package:serverpod_cli/src/commands/messages.dart';
+import 'package:serverpod_cli/src/commands/runner_options.dart';
 import 'package:serverpod_cli/src/commands/serverpod_command.dart';
 import 'package:serverpod_cli/src/commands/serverpod_command_runner.dart';
 import 'package:serverpod_cli/src/commands/start.dart';
@@ -52,36 +53,10 @@ class RunnerCommand extends ServerpodCommand<OptionDefinition> {
 /// runner up and returns, so the options that describe a UI - whether to
 /// attach, whether to render one - have nothing to act on.
 enum RunnerStartOption<V> implements OptionDefinition<V> {
-  watch(
-    FlagOption(
-      argName: 'watch',
-      argAbbrev: 'w',
-      defaultsTo: true,
-      negatable: true,
-      helpText: 'Watch files and use the Frontend Server.',
-    ),
-  ),
-  directory(
-    StringOption(
-      argName: 'directory',
-      argAbbrev: 'd',
-      defaultsTo: '',
-      helpText: 'The server directory.',
-    ),
-  ),
-  docker(
-    FlagOption(
-      argName: 'docker',
-      helpText: 'Start Docker Compose services if a compose file exists.',
-    ),
-  ),
-  flutter(
-    FlagOption(
-      argName: 'flutter',
-      defaultsTo: true,
-      helpText: 'Auto-launch companion Flutter apps on the first UI attach.',
-    ),
-  ),
+  watch<bool>(runnerWatchOption),
+  directory<String>(runnerDirectoryOption),
+  docker<bool>(runnerDockerOption),
+  flutter<bool>(runnerFlutterOption),
   ;
 
   const RunnerStartOption(this.option);
@@ -161,36 +136,10 @@ class RunnerStartCommand extends ServerpodCommand<RunnerStartOption> {
 /// Mirrors the stack-shaping half of `start`; the options that describe a
 /// client have no meaning here.
 enum RunnerServeOption<V> implements OptionDefinition<V> {
-  watch(
-    FlagOption(
-      argName: 'watch',
-      argAbbrev: 'w',
-      defaultsTo: true,
-      negatable: true,
-      helpText: 'Watch files and use the Frontend Server.',
-    ),
-  ),
-  directory(
-    StringOption(
-      argName: 'directory',
-      argAbbrev: 'd',
-      defaultsTo: '',
-      helpText: 'The server directory.',
-    ),
-  ),
-  docker(
-    FlagOption(
-      argName: 'docker',
-      helpText: 'Start Docker Compose services if a compose file exists.',
-    ),
-  ),
-  flutter(
-    FlagOption(
-      argName: 'flutter',
-      defaultsTo: true,
-      helpText: 'Auto-launch companion Flutter apps on the first UI attach.',
-    ),
-  ),
+  watch<bool>(runnerWatchOption),
+  directory<String>(runnerDirectoryOption),
+  docker<bool>(runnerDockerOption),
+  flutter<bool>(runnerFlutterOption),
   detached(
     FlagOption(
       argName: 'detached',
@@ -297,18 +246,16 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
         shutdown: shutdown,
         logHistory: logHistory,
         serverStdoutSink: logHistory.serverOutputSink(
-          forwardTo: detached ? RunnerLogFileSink(logFile) : stdout,
+          forwardTo: detached ? logFile.lineSink() : stdout,
         ),
         serverStderrSink: logHistory.serverOutputSink(
-          forwardTo: detached
-              ? RunnerLogFileSink(logFile, prefix: 'stderr: ')
-              : stderr,
+          forwardTo: detached ? logFile.lineSink(prefix: 'stderr: ') : stderr,
         ),
         flutterStdoutEcho: detached
-            ? RunnerLogFileSink(logFile, prefix: 'flutter: ')
+            ? logFile.lineSink(prefix: 'flutter: ')
             : stdout,
         flutterStderrEcho: detached
-            ? RunnerLogFileSink(logFile, prefix: 'flutter: ')
+            ? logFile.lineSink(prefix: 'flutter: ')
             : stderr,
       );
 

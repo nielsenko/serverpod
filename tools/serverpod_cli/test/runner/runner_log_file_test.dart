@@ -74,7 +74,7 @@ void main() {
       () async {
         final file = RunnerLogFile(path: logPath);
         await file.open();
-        final sink = RunnerLogFileSink(file);
+        final sink = file.lineSink();
 
         final bytes = utf8.encode('héllo\n');
         // Split inside the two bytes of 'é', the way a pipe buffer would.
