@@ -3,23 +3,16 @@ import 'dart:developer' as developer;
 import 'package:serverpod_shared/log.dart';
 
 /// Posts structured log events via the VM service extension
-/// `ext.serverpod.log`, so CLI clients can subscribe via
+/// [serverpodLogEvent], so CLI clients can subscribe via
 /// `vmService.onExtensionEvent` and render them. In production where
 /// the VM service is disabled, [developer.postEvent] is a no-op.
+///
+/// Log entries are encoded by [encodeLogEntry], which the CLI decodes with
+/// [decodeLogEntry]; the shape lives in `serverpod_shared` because both ends
+/// of this event are separate packages.
 class VmServiceLogWriter extends LogWriter {
   @override
-  Future<void> log(LogEntry entry) async {
-    _postEvent({
-      'type': 'log',
-      'level': entry.level.name,
-      'message': entry.message,
-      'scopeId': entry.scope.id,
-      'timestamp': entry.time.toUtc().toIso8601String(),
-      'error': entry.error?.toString(),
-      'stackTrace': entry.stackTrace?.toString(),
-      'metadata': entry.metadata,
-    });
-  }
+  Future<void> log(LogEntry entry) async => _postEvent(encodeLogEntry(entry));
 
   @override
   Future<void> openScope(LogScope scope) async {
@@ -53,6 +46,6 @@ class VmServiceLogWriter extends LogWriter {
 
   static void _postEvent(Map<String, Object?> data) {
     data.removeWhere((_, v) => v == null);
-    developer.postEvent('ext.serverpod.log', data);
+    developer.postEvent(serverpodLogEvent, data);
   }
 }
