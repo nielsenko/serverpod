@@ -83,6 +83,7 @@ class RunnerManifest {
   final int? exitCode;
 
   RunnerManifest copyWith({
+    RunnerSockets? sockets,
     RunnerVmServiceUris? vmService,
     RunnerServerUris? servers,
     RunnerDocker? docker,
@@ -92,7 +93,7 @@ class RunnerManifest {
     protocolVersion: protocolVersion,
     cliVersion: cliVersion,
     pid: pid,
-    sockets: sockets,
+    sockets: sockets ?? this.sockets,
     config: config,
     vmService: vmService ?? this.vmService,
     servers: servers ?? this.servers,
