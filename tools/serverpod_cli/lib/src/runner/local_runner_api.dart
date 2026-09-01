@@ -114,12 +114,27 @@ class LocalRunnerApi implements InProcessRunnerApi {
     );
   }
 
-  /// Records that [appId] started or stopped.
+  /// Records that [appId] changed state.
+  ///
+  /// Both flags are read back off the Flutter manager rather than passed in:
+  /// it is the only thing that knows whether a spawn is still in flight, and
+  /// a caller that states it has to restate the manager's own transitions.
+  ///
+  /// [launchStage] names what the toolchain is doing, for the progress a
+  /// launching app reports on its way up.
   void recordFlutterAppState(
     String appId, {
-    required bool running,
     String? url,
-  }) => _emit(FlutterAppStateEvent(appId: appId, running: running, url: url));
+    String? launchStage,
+  }) => _emit(
+    FlutterAppStateEvent(
+      appId: appId,
+      running: isFlutterAppRunning(appId),
+      launching: isFlutterAppLaunching(appId),
+      url: url,
+      launchStage: launchStage,
+    ),
+  );
 
   /// Records that the set of configured apps changed.
   void recordFlutterApps(List<FlutterAppConfig> apps) =>
@@ -154,10 +169,15 @@ class LocalRunnerApi implements InProcessRunnerApi {
     watchModeEnabled: _watchModeEnabled,
     canLaunchFlutterApps: canLaunchFlutterApps,
     flutterApps: flutterApps,
+    launchingFlutterApps: {
+      for (final app in flutterApps)
+        if (isFlutterAppLaunching(app.id)) app.id,
+    },
     runningFlutterApps: {
       for (final app in flutterApps)
         if (isFlutterAppRunning(app.id)) app.id,
     },
+    flutterAppUrls: _stack?.flutterManager.appUrls ?? const {},
   );
 
   /// Stops emitting events.

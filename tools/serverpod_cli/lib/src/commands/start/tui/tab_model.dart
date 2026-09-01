@@ -38,6 +38,22 @@ class ServerLogTab implements PaneTab {
 }
 
 /// Flutter app log view pinned to [kAppsArea].
+/// Where a Flutter app is in its lifecycle, as a tab renders it.
+///
+/// One value rather than a `ready`/`stopped` pair: the two were derived from
+/// a single boolean, so `stopped` meant "not running" and an app was reported
+/// as stopped for the whole minute it spent launching.
+enum AppRunState {
+  /// Spawned, not yet ready. Shows a spinner and its startup stage.
+  launching,
+
+  /// Running, and serving a URL on a web device.
+  ready,
+
+  /// Not running: never launched, stopped by the user, or a failed launch.
+  stopped,
+}
+
 class AppLogTab implements PaneTab {
   /// Creates an [AppLogTab].
   AppLogTab({
@@ -46,8 +62,7 @@ class AppLogTab implements PaneTab {
     BoundedQueueList<String>? lines,
     BoundedQueueList<Object>? logHistory,
     InspectableScrollController? scrollController,
-    this.ready = false,
-    this.stopped = false,
+    this.runState = AppRunState.stopped,
     this.url,
     this.device,
     this.startupStage,
@@ -64,13 +79,18 @@ class AppLogTab implements PaneTab {
   @override
   final String label;
 
-  /// Whether the Flutter app is running and a URL has been published.
-  bool ready;
+  /// Where the app is in its lifecycle.
+  AppRunState runState;
 
-  /// Whether the Flutter app stopped.
-  /// This can be from user quitting the app
-  /// or from app launch failing.
-  bool stopped;
+  /// Whether the app is running and a URL has been published.
+  bool get ready => runState == AppRunState.ready;
+
+  /// Whether the app is not running, having stopped, failed to launch, or
+  /// never been launched.
+  bool get stopped => runState == AppRunState.stopped;
+
+  /// Whether the app has been spawned but is not ready yet.
+  bool get launching => runState == AppRunState.launching;
 
   /// HTTP URL the Flutter app is served at.
   String? url;

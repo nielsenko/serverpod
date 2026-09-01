@@ -55,6 +55,7 @@ sealed class RunnerEvent {
         'flutterAppState' => FlutterAppStateEvent(
           appId: json['appId'] as String? ?? '',
           running: json['running'] as bool? ?? false,
+          launching: json['launching'] as bool? ?? false,
           url: json['url'] as String?,
           launchStage: json['launchStage'] as String?,
         ),
@@ -105,8 +106,8 @@ final class OperationCompletedEvent extends RunnerEvent {
 
   /// The id [OperationStartedEvent] opened this operation under.
   ///
-  /// [CompletedOperation] carries only a label, and labels are not unique.
-  /// Two apps compiling report the same one. Without the id a client has to
+  /// [CompletedOperation] carries only a label, and labels are not unique -
+  /// two apps compiling report the same one. Without the id a client has to
   /// guess which tracked operation just ended.
   final String id;
 
@@ -222,12 +223,20 @@ final class FlutterAppStateEvent extends RunnerEvent {
   const FlutterAppStateEvent({
     required this.appId,
     required this.running,
+    required this.launching,
     this.url,
     this.launchStage,
   });
 
   final String appId;
   final bool running;
+
+  /// Whether the app is between its spawn and its ready signal.
+  ///
+  /// Distinct from [running]: a launching app has no URL and cannot be hot
+  /// reloaded, but it can be stopped, and a UI shows it as busy rather than
+  /// as absent.
+  final bool launching;
 
   /// The app's URL once it is serving one; null on non-web devices and while
   /// it is still starting.
@@ -246,6 +255,7 @@ final class FlutterAppStateEvent extends RunnerEvent {
     'event': 'flutterAppState',
     'appId': appId,
     'running': running,
+    'launching': launching,
     if (url != null) 'url': url,
     if (launchStage != null) 'launchStage': launchStage,
   };
