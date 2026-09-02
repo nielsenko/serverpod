@@ -36,6 +36,9 @@ class KernelCompiler {
   );
   late Future<FrontendServerClient> _client;
 
+  /// True until a full compile has been accepted. A rejected full compile
+  /// keeps it set, so the retry is a full compile again rather than an
+  /// increment on top of nothing.
   bool _needsFullCompile = true;
   bool _started = false;
 
@@ -153,7 +156,6 @@ class KernelCompiler {
     if (_needsFullCompile) {
       log.debug('compile: full');
       result = await client.compile();
-      _needsFullCompile = false;
     } else {
       // Invalidate the exact URI the FES was started with (see
       // [FrontendServerClient.packageConfigUri]) so the resident compiler
@@ -188,10 +190,18 @@ class KernelCompiler {
   ///
   /// Awaitable so callers can order it before disposing or reloading; the
   /// underlying FES `accept` is a fire-and-forget stdin write.
-  Future<void> accept() => _client.then((c) => c.accept());
+  Future<void> accept() async {
+    final client = await _client;
+    client.accept();
+    _needsFullCompile = false;
+  }
 
   /// Reject the last compile result.
-  Future<void> reject() => _client.then((c) => c.reject());
+  Future<void> reject() async {
+    final client = await _client;
+    await client.reject();
+    if (_needsFullCompile) client.reset();
+  }
 
   /// Reset the compiler so the next [compile] produces a complete kernel.
   ///
