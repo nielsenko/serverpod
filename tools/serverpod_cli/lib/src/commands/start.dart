@@ -1275,6 +1275,10 @@ Future<WatchLoopSetupResult> setupWatchLoop({
   // point only ever has to await [shutdown.future]
   unawaited(session.done.then(shutdown.complete));
 
+  void warmCompiler() {
+    if (session.isRunning) unawaited(session.warmCompiler());
+  }
+
   runnerApi.bindStack(
     session: session,
     flutterManager: flutterManager,
@@ -1310,7 +1314,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       return;
     }
     appsLaunched = true;
-    unawaited(session.launchAutoLaunchApps());
+    unawaited(session.launchAutoLaunchApps().then((_) => warmCompiler()));
   }
 
   if (launchFlutterApp) {
@@ -1318,6 +1322,8 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       clientAttached = true;
       launchAppsIfReady();
     };
+  } else {
+    warmCompiler();
   }
 
   McpSocketServer? mcpSocket = McpSocketServer(serverDir: serverDir);

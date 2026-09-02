@@ -55,6 +55,10 @@ class KernelCompiler {
   /// Whether [start] has run.
   bool get isStarted => _started;
 
+  /// Whether the next [compile] produces a complete kernel: nothing has been
+  /// accepted since [start], [reset], or [restart].
+  bool get needsFullCompile => _needsFullCompile;
+
   /// Exists while the Frontend Server may be writing [outputDill]; left
   /// behind if the session dies mid-compile.
   String get _compileMarkerPath => '$outputDill.compiling';

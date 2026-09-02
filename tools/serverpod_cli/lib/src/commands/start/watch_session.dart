@@ -622,6 +622,27 @@ class WatchSession {
   /// Forces a full recompile and hot reload (or restart).
   ///
   /// Useful when the user explicitly requests a reload via a button press.
+  /// Compiles once in the background after the server booted from the cached
+  /// dill, so the first edit is an increment instead of a full compile.
+  /// Queued on [_chain]: a file change that gets there first does the compile
+  /// itself and this becomes a no-op. The VM read the dill at boot, so
+  /// rewriting it now is safe. Never throws.
+  Future<void> warmCompiler() => _chain(() async {
+    final compiler = _compiler;
+    if (compiler == null || !compiler.needsFullCompile) return;
+    if (_state == SessionState.disposed) return;
+    try {
+      final result = await compileWithProgress(
+        'Warming the compiler',
+        compiler,
+        rejectOnFailure: true,
+      );
+      if (result != null) await compiler.accept();
+    } catch (e) {
+      log.debug('Compiler warm-up failed: $e');
+    }
+  });
+
   Future<void> forceReload() {
     if (_state == SessionState.disposed) {
       throw StateError('Session has been disposed.');
