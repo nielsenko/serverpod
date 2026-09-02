@@ -1349,6 +1349,16 @@ Future<WatchLoopSetupResult> setupWatchLoop({
 
     unawaited(session.done.then(shutdown.complete));
 
+    var compilerWarmed = false;
+    void warmCompiler() {
+      // Both the immediate and the post-launch path can reach here (a
+      // `--flutter` session that auto-launches nothing takes the first and
+      // then still runs the second when a client attaches). One turn only.
+      if (compilerWarmed || !session.isRunning) return;
+      compilerWarmed = true;
+      unawaited(session.warmCompiler());
+    }
+
     runnerApi.bindStack(
       session: session,
       flutterManager: flutterManager,
@@ -1378,7 +1388,17 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         return;
       }
       appsLaunched = true;
-      unawaited(session.launchAutoLaunchApps());
+      unawaited(
+        // Future.sync: launchAutoLaunchApps throws synchronously on a disposed
+        // session, which no handler attached to its result would ever see.
+        Future.sync(session.launchAutoLaunchApps)
+            .catchError(
+              (Object e) =>
+                  log.warning('Launching the Flutter apps failed: $e'),
+            )
+            // Whether or not they came up, nothing is waiting on the chain now.
+            .whenComplete(warmCompiler),
+      );
     }
 
     if (launchFlutterApp) {
@@ -1386,6 +1406,13 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         clientAttached = true;
         launchAppsIfReady();
       };
+    }
+    // Deferring the warm-up to the auto-launch only makes sense when there is
+    // one coming. `--flutter` on a project that configures no auto-launch app
+    // would otherwise wait on a launch that never happens.
+    if (!launchFlutterApp ||
+        !flutterManager.apps.any((app) => app.autoLaunch)) {
+      warmCompiler();
     }
 
     McpSocketServer? mcpSocket = McpSocketServer(serverDir: serverDir);

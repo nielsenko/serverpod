@@ -623,6 +623,29 @@ class WatchSession {
     return true;
   }
 
+  /// Compiles once in the background after the server booted from the cached
+  /// dill, so the first edit is an increment instead of a full compile.
+  ///
+  /// Queued on [_chain]: a file change that gets there first does the compile
+  /// itself and this becomes a no-op. Rewriting the dill under the running
+  /// pod is safe - the VM copies the kernel into memory at load and never
+  /// reads the file again. Never throws.
+  Future<void> warmCompiler() => _chain(() async {
+    final compiler = _compiler;
+    if (compiler == null || !compiler.needsFullCompile) return;
+    if (_state == SessionState.disposed) return;
+    try {
+      final result = await compileWithProgress(
+        'Warming the compiler',
+        compiler,
+        rejectOnFailure: true,
+      );
+      if (result != null) await compiler.accept();
+    } catch (e) {
+      log.debug('Compiler warm-up failed: $e');
+    }
+  });
+
   /// Forces a hot reload.
   ///
   /// Forces a full recompile and hot reload (or restart).
@@ -881,12 +904,13 @@ class WatchSession {
       log.debug('Flutter app $appId not ready; skipping reload.');
       return;
     }
-    final ok = await log.progress('Reloading Flutter', flutter.reload);
-    if (ok) {
-      log.info(flutterAppReloaded);
-    } else {
-      log.warning('Flutter app $appId reload failed.');
-    }
+    // The progress scope is the whole report: it names the app, carries the
+    // latency, and marks itself failed. [FlutterProcess.reload] has already
+    // said why on every path that returns false.
+    await log.progress(
+      'Reloading ${_flutterManager!.appNameFor(appId)}',
+      flutter.reload,
+    );
   }
 
   /// Hot-restarts a Flutter app and logs the outcome. Never throws.
@@ -897,12 +921,10 @@ class WatchSession {
       log.debug('Flutter app $appId not ready; skipping restart.');
       return;
     }
-    final ok = await flutter.restart();
-    if (ok) {
-      log.info(flutterAppRestarted);
-    } else {
-      log.warning('Flutter app $appId restart failed.');
-    }
+    await log.progress(
+      'Restarting ${_flutterManager!.appNameFor(appId)}',
+      flutter.restart,
+    );
   }
 
   void _monitorExit(ServerProcess server) {
