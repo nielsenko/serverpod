@@ -883,7 +883,7 @@ class WatchSession {
       log.debug('Flutter app $appId not ready; skipping reload.');
       return;
     }
-    final ok = await flutter.reload();
+    final ok = await log.progress('Reloading Flutter', flutter.reload);
     if (ok) {
       log.info(flutterAppReloaded);
     } else {
