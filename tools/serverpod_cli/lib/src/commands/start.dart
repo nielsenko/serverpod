@@ -1253,6 +1253,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       serverDir: serverDir,
       runMode: runMode,
     ),
+    servesWeb: serverConfig?.webServer != null,
   );
 
   // Route IDE attach auto-launch through the session so it serializes with

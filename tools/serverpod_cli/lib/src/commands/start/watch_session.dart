@@ -132,6 +132,10 @@ class WatchSession {
   final FlutterAppManager? _flutterManager;
   final FlutterAppsLoader? _flutterAppsLoader;
 
+  /// Whether the project configures a web server, and so has a browser to
+  /// refresh after a reload.
+  final bool _servesWeb;
+
   /// Whether a Flutter app process is currently running. Used e.g. to label
   /// the Ctrl+R action as a start or a restart.
   bool get isFlutterAppRunning =>
@@ -204,7 +208,9 @@ class WatchSession {
     PackageDependencyTracker? serverDependencyTracker,
     FlutterAppManager? flutterManager,
     FlutterAppsLoader? flutterAppsLoader,
+    bool servesWeb = true,
   }) : _compiler = compiler,
+       _servesWeb = servesWeb,
        _nativeAssetsBuilder = nativeAssetsBuilder,
        _generate = generate,
        _fullGenerate = fullGenerate,
@@ -447,7 +453,13 @@ class WatchSession {
   /// static change counter, which the dev auto-refresh script polls. Called
   /// both for static file changes and after the server reloads new Dart code,
   /// so server-rendered web pages stay in sync.
+  ///
+  /// Skipped for a project that serves no web: the extension this calls is
+  /// registered by the web server itself, so asking a pod without one is a
+  /// request that can only ever come back unknown - once per reload, as a
+  /// warning about nothing.
   Future<void> _notifyBrowserRefresh() async {
+    if (!_servesWeb) return;
     final server = _server;
     if (server == null || !server.isVmServiceConnected) {
       log.debug('Server VM service not connected; skipping browser refresh.');
