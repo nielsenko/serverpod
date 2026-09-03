@@ -57,7 +57,14 @@ Future<int> attachWithLogStream(
   void leaveIfUnrecoverable(RunnerStage stage) {
     if (stage != RunnerStage.degraded || client.watchModeEnabled) return;
     if (done.isCompleted) return;
-    sink.writeln('--- nothing will rebuild it from here ---');
+    // The runner stays up for a client to rebuild from, as `--no-attach`
+    // also reports; leaving without saying so strands it in a session
+    // nobody is watching.
+    sink.writeln(
+      '--- nothing will rebuild it from here: the runner is still up, '
+      'rebuild it from `serverpod runner attach` once the errors are fixed, '
+      'or stop it with `serverpod runner stop` ---',
+    );
     done.complete(1);
   }
 
