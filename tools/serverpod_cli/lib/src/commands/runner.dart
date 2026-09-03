@@ -263,18 +263,21 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
     // detaches, always passes the directory it spawned the runner for.
     final logFile = RunnerLogFile.forServer(directory);
     final logHistory = StartLogHistory();
-    if (detached) {
-      await logFile.open();
-      await closeLogger();
-      initializeLoggerWith(
-        ServerpodCliLogger(
-          MultiLogWriter([
-            StartLogHistoryWriter(logHistory),
-            RunnerLogFileWriter(logFile),
-          ]),
-        ),
-      );
-    }
+    // The history is what an attached client renders, so the runner's own
+    // output belongs in it whether or not this process is detached: without
+    // it a client sees the pod's lines and none of the generation, compile or
+    // progress output that explains them. Only the log file, and the terminal
+    // it stands in for, depend on being detached.
+    if (detached) await logFile.open();
+    await closeLogger();
+    initializeLoggerWith(
+      ServerpodCliLogger(
+        MultiLogWriter([
+          StartLogHistoryWriter(logHistory),
+          if (detached) RunnerLogFileWriter(logFile) else stdOutLogWriter(),
+        ]),
+      ),
+    );
 
     final config = await GeneratorConfig.load(
       serverRootDir: directory,

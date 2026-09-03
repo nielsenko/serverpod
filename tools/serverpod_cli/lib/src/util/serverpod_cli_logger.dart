@@ -31,15 +31,20 @@ void initializeLogger() {
     'Only one logger initialization is allowed.',
   );
 
-  _logger = ServerpodCliLogger(
-    IsolatedLogWriter(
-      () => StdOutLogWriter(
-        replacements: Platform.isWindows ? _windowsLoggerReplacements : null,
-      ),
-    ),
-  );
+  _logger = ServerpodCliLogger(stdOutLogWriter());
   _attachGlobalLogBridge();
 }
+
+/// The writer [initializeLogger] installs: the CLI's own output, on stdout.
+///
+/// Exposed for a command that writes elsewhere as well - the runner records
+/// its output in the history it serves to attached clients - so the terminal
+/// half is composed rather than restated.
+shared.LogWriter stdOutLogWriter() => IsolatedLogWriter(
+  () => StdOutLogWriter(
+    replacements: Platform.isWindows ? _windowsLoggerReplacements : null,
+  ),
+);
 
 /// Replaces the logger singleton with the given [logger].
 ///
