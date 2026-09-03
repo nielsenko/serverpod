@@ -19,21 +19,6 @@ import 'package:serverpod_cli/src/runner/runner_snapshot.dart';
 /// answer fails and says so, leaving the caller to decide whether to ask. Every
 /// command stays answerable with no client attached.
 ///
-/// Thrown by every command a runner cannot serve until its stack is up.
-///
-/// The runner binds its attach socket before it has a stack, so a UI can watch
-/// the minutes generation, Docker and the first compile take. Everything that
-/// needs the stack reports this until then; `stop` works throughout.
-class RunnerStartingException implements Exception {
-  const RunnerStartingException(this.command);
-
-  final String command;
-
-  @override
-  String toString() =>
-      'The runner is still starting; $command is not available yet.';
-}
-
 /// Conflicting commands are serialized, so two callers issuing overlapping
 /// migrations or reloads is well-defined rather than racy.
 abstract interface class RunnerApi {
@@ -167,4 +152,19 @@ abstract interface class InProcessRunnerApi implements RunnerApi {
   /// Fires whenever [vmServiceUri] changes, which happens on restart and on
   /// crash recovery but not on hot reload.
   Stream<void> get vmServiceUriChanges;
+}
+
+/// Thrown by every command a runner cannot serve until its stack is up.
+///
+/// The runner binds its attach socket before it has a stack, so a UI can watch
+/// the minutes generation, Docker and the first compile take. Everything that
+/// needs the stack reports this until then; `stop` works throughout.
+class RunnerStartingException implements Exception {
+  const RunnerStartingException(this.command);
+
+  final String command;
+
+  @override
+  String toString() =>
+      'The runner is still starting; $command is not available yet.';
 }
