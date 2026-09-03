@@ -326,6 +326,9 @@ class StartLogHistory {
 
   /// Appends [entry]'s message, error and stack trace as raw lines of the
   /// Flutter app [appId], mirroring how the app would have printed them.
+  ///
+  /// Emits nothing: the caller emits the structured entry covering the same
+  /// text, and a client rendering both events would print it twice.
   void _addFlutterEntryLines(String appId, LogEntry entry) {
     final raw = StringBuffer(entry.message);
     if (entry.error != null) {
@@ -336,8 +339,9 @@ class StartLogHistory {
       if (raw.isNotEmpty) raw.writeln();
       raw.write(entry.stackTrace);
     }
+    final lines = flutterLinesFor(appId);
     for (final line in stripAnsi(raw.toString()).split('\n')) {
-      addFlutterLine(appId, line);
+      lines.add(line);
     }
   }
 }
