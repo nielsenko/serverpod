@@ -251,19 +251,26 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
   Future<void> runWithConfig(
     Configuration<RunnerServeOption> commandConfig,
   ) async {
-    final config = await GeneratorConfig.load(
-      serverRootDir: commandConfig.value(RunnerServeOption.directory),
-      interactive: false,
-    );
-    final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
-
+    final directory = commandConfig.value(RunnerServeOption.directory);
     final detached = commandConfig.value(RunnerServeOption.detached);
-    final logFile = RunnerLogFile.forServer(serverDir);
+
+    // Taken from the argument rather than the loaded config, and opened before
+    // the load: a detached process has no stdio, so a project that fails to
+    // load reports into a closed file descriptor and leaves the log the
+    // spawning CLI names empty. `serverpod start`, the only caller that
+    // detaches, always passes the directory it spawned the runner for.
+    final logFile = RunnerLogFile.forServer(directory);
     if (detached) {
       await logFile.open();
       await closeLogger();
       initializeLoggerWith(ServerpodCliLogger(RunnerLogFileWriter(logFile)));
     }
+
+    final config = await GeneratorConfig.load(
+      serverRootDir: directory,
+      interactive: false,
+    );
+    final serverDir = p.joinAll(config.serverPackageDirectoryPathParts);
 
     final shutdown = ShutdownSignal();
     try {
