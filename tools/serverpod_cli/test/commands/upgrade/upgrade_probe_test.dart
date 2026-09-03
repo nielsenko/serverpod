@@ -46,10 +46,12 @@ void main() {
   group('Given an executable dart install put on PATH,', () {
     late String bundleExecutable;
     late Directory binDirectory;
+    late String installRoot;
 
     setUp(() {
       final root = _tempDirectory();
       bundleExecutable = _createAppBundle(root);
+      installRoot = canonicalize(p.join(root.path, 'install'));
       binDirectory = Directory(p.join(root.path, 'install', 'bin'))
         ..createSync(recursive: true);
     });
@@ -64,7 +66,7 @@ void main() {
         expect(
           classifyInstallation(
             runningExecutable: canonicalize(bundleExecutable),
-            managedExecutable: canonicalize(managed),
+            installRoot: installRoot,
           ),
           CliInstallationKind.managed,
         );
@@ -86,7 +88,7 @@ void main() {
         expect(
           classifyInstallation(
             runningExecutable: canonicalize(bundleExecutable),
-            managedExecutable: canonicalize(managed),
+            installRoot: installRoot,
           ),
           CliInstallationKind.managed,
         );
@@ -116,9 +118,7 @@ void main() {
         expect(
           classifyInstallation(
             runningExecutable: canonicalize(dartExecutable),
-            managedExecutable: canonicalize(
-              p.join(root.path, 'install', 'bin', 'serverpod'),
-            ),
+            installRoot: canonicalize(p.join(root.path, 'install')),
           ),
           isNot(CliInstallationKind.source),
           reason:
