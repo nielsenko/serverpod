@@ -177,17 +177,14 @@ Future<int> _attachWithTui(String socketPath) async {
 /// to do before exiting.
 void _printLogTail(StartLogHistory history, {int lines = 20}) {
   final entries = history.serverEntries.toList();
-  final raw = history.serverLines.toList();
-  if (entries.isEmpty && raw.isEmpty) return;
+  if (entries.isEmpty) return;
 
-  Iterable<T> tail<T>(List<T> all) =>
-      all.length > lines ? all.sublist(all.length - lines) : all;
+  final tail = entries.length > lines
+      ? entries.sublist(entries.length - lines)
+      : entries;
 
   stdout.writeln('--- the runner stopped; its last log entries were ---');
-  for (final entry in tail(entries)) {
+  for (final entry in tail) {
     stdout.writeln(formatHistoryEntry(entry));
-  }
-  for (final line in tail(raw)) {
-    stdout.writeln(line);
   }
 }

@@ -118,6 +118,83 @@ void main() {
     );
 
     test(
+      'when the pod prints a line its structured log also carries, '
+      'then the line is rendered once.',
+      () async {
+        runner
+          ..stage = RunnerStage.running
+          ..logHistory = [
+            LogEntry(
+              time: DateTime.utc(2026, 8, 25),
+              level: LogLevel.info,
+              message: 'Server listening.',
+              scope: LogScope.root('server'),
+            ),
+          ]
+          ..serverLines = ['2026-08-25T00:00:00.000Z [INFO] Server listening.'];
+
+        final session = attachWithLogStream(
+          server.socketPath,
+          out: sink,
+          interrupts: interrupts.stream,
+        );
+        await _waitFor(
+          () => sink.lines.any((l) => l.contains('Server listening.')),
+        );
+
+        expect(
+          sink.lines.where((l) => l.contains('Server listening.')),
+          hasLength(1),
+        );
+
+        // The events arrive in order, so once the structured one is rendered
+        // the marked copy would have been too.
+        runner
+          ..emit(const ServerLineEvent('[INFO] Booted.', duplicatesEntry: true))
+          ..emit(
+            ServerLogEvent(
+              LogEntry(
+                time: DateTime.utc(2026, 8, 25),
+                level: LogLevel.info,
+                message: 'Booted.',
+                scope: LogScope.root('server'),
+              ),
+            ),
+          );
+        await _waitFor(() => sink.lines.any((l) => l.contains('Booted.')));
+
+        expect(sink.lines.where((l) => l.contains('Booted.')), hasLength(1));
+
+        interrupts.add(ProcessSignal.sigint);
+        expect(await session, 0);
+      },
+    );
+
+    test(
+      'when the pod printed a line before its structured log was live, '
+      'then the line is rendered, because it is the only copy.',
+      () async {
+        final session = attachWithLogStream(
+          server.socketPath,
+          out: sink,
+          interrupts: interrupts.stream,
+        );
+        await _waitFor(() => sink.lines.isNotEmpty);
+        sink.lines.clear();
+
+        runner.emit(const ServerLineEvent('Connecting to the database...'));
+        await _waitFor(
+          () => sink.lines.any((l) => l.contains('Connecting to the database')),
+        );
+
+        expect(sink.lines, contains('Connecting to the database...'));
+
+        interrupts.add(ProcessSignal.sigint);
+        expect(await session, 0);
+      },
+    );
+
+    test(
       'when it attaches to a stack that failed to build with watch mode off, '
       'then it leaves with one rather than streaming a server that is never coming up.',
       () async {

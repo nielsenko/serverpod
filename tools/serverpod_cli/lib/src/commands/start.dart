@@ -789,7 +789,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       vmServiceInfoFile: podInfoFile,
       stdoutSink: serverStdoutSink,
       stderrSink: serverStderrSink,
-      onDispose: logHistory.discardActiveServerScopes,
+      onDispose: logHistory.serverProcessGone,
     );
     await serverProcess.start(dillPath: dillPath);
     await serverProcess.connectToVmService();
@@ -797,6 +797,7 @@ Future<WatchLoopSetupResult> _setupWatchLoop({
       serverProcess.vmService,
       logHistory.recordServerLogEvent,
     );
+    logHistory.markServerStructuredLogging();
     runnerEvents?.setStage(RunnerStage.running);
     if (onServerStart != null) await onServerStart(serverProcess);
     proxy = await _mountOrRetargetProxy(

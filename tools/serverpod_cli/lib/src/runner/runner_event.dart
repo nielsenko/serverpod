@@ -31,7 +31,10 @@ sealed class RunnerEvent {
               as CompletedOperation,
           id: json['operationId'] as String? ?? '',
         ),
-        'serverLine' => ServerLineEvent(json['line'] as String? ?? ''),
+        'serverLine' => ServerLineEvent(
+          json['line'] as String? ?? '',
+          duplicatesEntry: json['duplicatesEntry'] as bool? ?? false,
+        ),
         'flutterLine' => FlutterLineEvent(
           appId: json['appId'] as String? ?? '',
           line: json['line'] as String? ?? '',
@@ -117,12 +120,28 @@ final class OperationCompletedEvent extends RunnerEvent {
 
 /// A raw output line the pod printed.
 final class ServerLineEvent extends RunnerEvent {
-  const ServerLineEvent(this.line);
+  const ServerLineEvent(this.line, {this.duplicatesEntry = false});
 
   final String line;
 
+  /// Whether a [ServerLogEvent] carries this same text.
+  ///
+  /// The pod writes every entry to its stdout as well as to its VM service,
+  /// so once the runner is receiving the structured half, the raw line is a
+  /// second copy and a client rendering both prints it twice. False for
+  /// output that never was an entry - `print`, a crash, anything logged
+  /// before the runner subscribed - where this is the only copy there is.
+  ///
+  /// The runner decides this; a client cannot, since the two copies arrive as
+  /// unrelated events.
+  final bool duplicatesEntry;
+
   @override
-  Map<String, Object?> toJson() => {'event': 'serverLine', 'line': line};
+  Map<String, Object?> toJson() => {
+    'event': 'serverLine',
+    'line': line,
+    if (duplicatesEntry) 'duplicatesEntry': true,
+  };
 }
 
 /// A raw output line from a Flutter app.

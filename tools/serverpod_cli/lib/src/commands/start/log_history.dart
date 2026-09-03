@@ -120,10 +120,40 @@ class StartLogHistory {
     onChanged?.call();
   }
 
+  /// Whether the runner is receiving the pod's structured log.
+  ///
+  /// False from the moment a pod process starts until the runner has
+  /// subscribed to its VM service, and again once that process is gone.
+  /// `postEvent` drops what it posts while nobody is listening, so for that
+  /// window - which covers the whole boot sequence - the raw line is the only
+  /// copy an entry has. After it, the pod's stdout writer repeats every entry
+  /// verbatim.
+  ///
+  /// This is the one place that knows the difference, so it is the one place
+  /// that decides: see [addServerLine].
+  bool _serverStructuredLogging = false;
+
+  /// Records that the pod's structured log is now reaching
+  /// [recordServerLogEvent].
+  void markServerStructuredLogging() => _serverStructuredLogging = true;
+
+  /// Records that the pod process is gone, taking its structured log with it.
+  void serverProcessGone() {
+    _serverStructuredLogging = false;
+    discardActiveServerScopes();
+  }
+
   /// Appends [line] to the pod's raw output.
+  ///
+  /// A line the pod's structured log does not also carry joins
+  /// [serverEntries]: it is part of the account, and putting it there is what
+  /// keeps that account in order, which two buffers with no shared timestamp
+  /// could not be merged into afterwards.
   void addServerLine(String line) {
+    final duplicatesEntry = _serverStructuredLogging;
     serverLines.add(line);
-    _emit(ServerLineEvent(line));
+    if (!duplicatesEntry) serverEntries.add(line);
+    _emit(ServerLineEvent(line, duplicatesEntry: duplicatesEntry));
     onServerLine?.call(line);
     onChanged?.call();
   }

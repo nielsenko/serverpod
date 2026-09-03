@@ -694,6 +694,11 @@ class MainScreen extends StatelessComponent {
                   operation: item,
                 );
               }
+              // Pod output with no structured counterpart, kept in the
+              // account so the boot sequence is not missing from it.
+              if (item is String) {
+                return Text(item, key: ValueKey(index));
+              }
               return const SizedBox.shrink();
             },
           ),

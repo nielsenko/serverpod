@@ -318,8 +318,12 @@ class RunnerClient implements RunnerApi {
         );
         history.serverEntries.add(operation);
 
-      case ServerLineEvent(:final line):
+      case ServerLineEvent(:final line, :final duplicatesEntry):
         history.serverLines.add(line);
+        // Mirrors what the runner did with the same line, rather than
+        // deciding again: only the runner knows whether the pod's structured
+        // log was live when this was printed.
+        if (!duplicatesEntry) history.serverEntries.add(line);
         history.onServerLine?.call(line);
 
       case FlutterLineEvent(:final appId, :final line):

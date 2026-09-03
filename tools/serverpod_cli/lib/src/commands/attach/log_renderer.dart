@@ -10,7 +10,9 @@ import 'package:serverpod_shared/log.dart';
 ///
 /// This is what CI, piped output, and `docker logs`-style workflows use: no
 /// alternate screen, no cursor control, one line per entry so `grep` and a
-/// scrollback buffer both work.
+/// scrollback buffer both work. The account is the one the terminal UI shows:
+/// the CLI's own entries and the pod's structured log, in the order they
+/// happened.
 ///
 /// Returns the exit code to leave with: the runner's own when it announces
 /// that it is stopping, 1 for a stack that failed to build and has no way to
@@ -36,9 +38,6 @@ Future<int> attachWithLogStream(
   await client.attach();
 
   final history = client.history;
-  for (final line in history.serverLines) {
-    sink.writeln(line);
-  }
   for (final entry in history.serverEntries) {
     sink.writeln(formatHistoryEntry(entry));
   }
@@ -114,8 +113,11 @@ String _stageLine(RunnerStage stage) => switch (stage) {
 
 String? _formatEvent(RunnerEvent event) => switch (event) {
   ServerLogEvent(:final entry) => _formatLogEntry(entry),
-  // The pod's own stdout, already a finished line.
-  ServerLineEvent(:final line) => line,
+  // Raw pod output, rendered unless the runner marked it as the text form of
+  // an entry that arrives on its own. The unmarked ones - `print`, a crash,
+  // anything from before the structured log was live - are the only copy.
+  ServerLineEvent(:final line, :final duplicatesEntry) =>
+    duplicatesEntry ? null : line,
   FlutterLineEvent(:final appId, :final line) => '[$appId] $line',
   FlutterLogEntryEvent(:final appId, :final entry) =>
     '[$appId] ${_formatLogEntry(entry)}',
