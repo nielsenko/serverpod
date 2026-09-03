@@ -94,13 +94,18 @@ class RunnerLogFile {
       _hold(text);
       return;
     }
-    if (_written > 0 && _written + text.length > _rotateAt) {
+    // Encoded here rather than by the sink so the running total is in the
+    // same unit as the size [open] reads off the file: a log carrying
+    // non-ASCII is otherwise measured short of what it takes on disk, and
+    // grows past [maxBytes] before anything rotates it.
+    final bytes = utf8.encode(text);
+    if (_written > 0 && _written + bytes.length > _rotateAt) {
       _hold(text);
       _rotation = _rotate();
       return;
     }
-    _written += text.length;
-    sink.write(text);
+    _written += bytes.length;
+    sink.add(bytes);
   }
 
   void _hold(String text) {
