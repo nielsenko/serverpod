@@ -76,6 +76,17 @@ class RunnerSocketServer {
     _closing = true;
     await _eventSub?.cancel();
     _eventSub = null;
+    // The last event - `stopping`, carrying the exit code a client leaves
+    // with - is still buffered in the socket: closing the peer only starts the
+    // socket's own close, and `destroy()` below drops whatever has not reached
+    // the OS by then.
+    for (final socket in _sockets.toList()) {
+      try {
+        await socket.flush();
+      } catch (_) {
+        // The client is already gone; there is nothing left to deliver.
+      }
+    }
     await Future.wait([for (final peer in _peers.toList()) peer.close()]);
     _peers.clear();
     for (final socket in _sockets.toList()) {
