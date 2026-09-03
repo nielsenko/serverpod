@@ -251,12 +251,12 @@ class RunnerServeCommand extends ServerpodCommand<RunnerServeOption> {
         serverStderrSink: logHistory.serverOutputSink(
           forwardTo: detached ? logFile.lineSink(prefix: 'stderr: ') : stderr,
         ),
-        flutterStdoutEcho: detached
-            ? logFile.lineSink(prefix: 'flutter: ')
-            : stdout,
-        flutterStderrEcho: detached
-            ? logFile.lineSink(prefix: 'flutter: ')
-            : stderr,
+        flutterStdoutEchoFor: detached
+            ? (appId) => logFile.lineSink(prefix: 'flutter[$appId]: ')
+            : (_) => stdout,
+        flutterStderrEchoFor: detached
+            ? (appId) => logFile.lineSink(prefix: 'flutter[$appId]: ')
+            : (_) => stderr,
       );
 
       switch (result) {
