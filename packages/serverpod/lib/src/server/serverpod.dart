@@ -103,6 +103,16 @@ class Serverpod {
   /// The server configuration, as read from the config/ directory.
   late ServerpodConfig config;
 
+  /// [config] as it was configured, before any bound port was folded into it.
+  ///
+  /// [_publishResolvedAddresses] rewrites [config] with the ports the
+  /// listeners actually bound, which erases the 0 that marks a port as
+  /// ephemeral. Resolving from the rewritten config a second time - the
+  /// user-facing servers restart around a migration, and an ephemeral port is
+  /// a new one after every bind - would leave the first run's port advertised
+  /// while the server listens on the second's.
+  late final ServerpodConfig _configuredConfig = config;
+
   /// A function to override the server configuration.
   ///
   /// This function is called with the default server configuration after it is
@@ -1241,16 +1251,17 @@ class Serverpod {
   /// stack - the real port is only known now. Advertising the configured one
   /// would send clients to a port nothing is listening on.
   void _publishResolvedAddresses() {
-    final api = config.apiServer.withResolvedPort(server.port);
+    final configured = _configuredConfig;
+    final api = configured.apiServer.withResolvedPort(server.port);
     final insights = _insightsServer == null
         ? null
-        : config.insightsServer?.withResolvedPort(_insightsServer!.port);
+        : configured.insightsServer?.withResolvedPort(_insightsServer!.port);
     final webPort = Features.enableWebServer(_webServer)
         ? webServer.port
         : null;
     final web = webPort == null
         ? null
-        : config.webServer?.withResolvedPort(webPort);
+        : configured.webServer?.withResolvedPort(webPort);
 
     config = config.copyWith(
       apiServer: api,
