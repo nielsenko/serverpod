@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:clock/clock.dart';
+import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_auth_core_server/src/jwt/business/refresh_token_exceptions.dart';
@@ -153,11 +154,11 @@ class JwtAdmin {
       lockMode: LockMode.forUpdate,
     );
 
+    // `Digest` equality is constant time, so a caller cannot recover the
+    // fixed secret byte by byte through response timing.
     if (refreshTokenRow == null ||
-        !uint8ListAreEqual(
-          Uint8List.sublistView(refreshTokenRow.fixedSecret),
-          refreshTokenData.fixedSecret,
-        )) {
+        Digest(Uint8List.sublistView(refreshTokenRow.fixedSecret)) !=
+            Digest(refreshTokenData.fixedSecret)) {
       throw RefreshTokenNotFoundServerException();
     }
 
