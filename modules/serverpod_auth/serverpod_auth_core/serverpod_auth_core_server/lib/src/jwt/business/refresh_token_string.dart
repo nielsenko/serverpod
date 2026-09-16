@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 
+import '../../common/utils/decode_base64_secret.dart';
 import '../../generated/protocol.dart';
 
 @internal
@@ -23,33 +24,24 @@ abstract final class RefreshTokenString {
   static RefreshTokenStringData parseRefreshTokenString(
     final String refreshToken,
   ) {
+    // Exceptions must not carry the token, as callers may log them.
     if (!refreshToken.startsWith('$_refreshTokenPrefix:')) {
-      throw ArgumentError.value(
-        refreshToken,
-        'refreshToken',
-        'Refresh token does not start with "$_refreshTokenPrefix"',
+      throw const FormatException(
+        'Refresh token does not start with "$_refreshTokenPrefix".',
       );
     }
 
     final parts = refreshToken.split(':');
     if (parts.length != 4) {
-      throw ArgumentError.value(
-        refreshToken,
-        'refreshToken',
+      throw const FormatException(
         'Refresh token does not consist of 4 parts separated by ":".',
       );
     }
 
-    final refreshTokenId = UuidValue.fromByteList(base64Decode(parts[1]));
-
-    final fixedSecret = base64Decode(parts[2]);
-
-    final rotatingSecret = base64Decode(parts[3]);
-
     return (
-      id: refreshTokenId,
-      fixedSecret: fixedSecret,
-      rotatingSecret: rotatingSecret,
+      id: UuidValue.fromByteList(decodeBase64Secret(parts[1])),
+      fixedSecret: decodeBase64Secret(parts[2]),
+      rotatingSecret: decodeBase64Secret(parts[3]),
     );
   }
 }

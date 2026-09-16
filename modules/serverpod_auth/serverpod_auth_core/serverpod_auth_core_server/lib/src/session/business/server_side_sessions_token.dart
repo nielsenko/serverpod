@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 
+import '../../common/utils/decode_base64_secret.dart';
+
 /// Prefix for sessions keys
 /// "sas" being abbreviated of "serverpod_auth_session"
 final _sessionKeyPrefix = utf8.encode('sas');
@@ -43,7 +45,7 @@ SessionKeyData? tryParseServerSideSessionToken(
       return null;
     }
 
-    final decoded = base64Url.decode(key);
+    final decoded = decodeBase64Secret(key);
 
     final serverSideSessionId = UuidValue.fromByteList(
       Uint8List.sublistView(
@@ -61,7 +63,7 @@ SessionKeyData? tryParseServerSideSessionToken(
     return (serverSideSessionId: serverSideSessionId, secret: secret);
   } catch (e, stackTrace) {
     session?.log(
-      'Failed to parse session key: "$key"',
+      'Failed to parse session key',
       level: LogLevel.error,
       exception: e,
       stackTrace: stackTrace,
