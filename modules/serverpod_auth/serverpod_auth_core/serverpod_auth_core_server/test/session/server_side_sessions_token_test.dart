@@ -5,6 +5,7 @@ import 'package:serverpod_auth_core_server/src/session/business/server_side_sess
 import 'package:test/test.dart';
 
 import '../serverpod_test_tools.dart';
+import '../test_util/capture_console_output.dart';
 
 void main() {
   withServerpod(
@@ -49,6 +50,42 @@ void main() {
 
           expect(keyParts?.serverSideSessionId, serverSideSessionId);
           expect(keyParts?.secret, secret);
+        },
+      );
+    },
+  );
+
+  withServerpod(
+    'Given session logs written to the console,',
+    enableSessionLogging: true,
+    configOverride: (final config) => config.copyWith(
+      sessionLogs: config.sessionLogs.copyWith(
+        consoleEnabled: true,
+        consoleLogFormat: ConsoleLogFormat.text,
+      ),
+    ),
+    (final sessionBuilder, final endpoints) {
+      test(
+        'when parsing a truncated session key, '
+        'then the failure is logged without the key',
+        () async {
+          final session = sessionBuilder.build();
+          final key = buildServerSideSessionToken(
+            serverSideSessionId: const Uuid().v4obj(),
+            secret: Uint8List.fromList(List.generate(32, (final i) => i)),
+          );
+          final truncatedKey = key.substring(0, key.length - 1);
+
+          final output = await captureConsoleOutput(() async {
+            tryParseServerSideSessionToken(session, truncatedKey);
+            await session.close();
+          });
+
+          expect(
+            output,
+            contains('Failed to parse session key'),
+          );
+          expect(output, isNot(contains(truncatedKey)));
         },
       );
     },

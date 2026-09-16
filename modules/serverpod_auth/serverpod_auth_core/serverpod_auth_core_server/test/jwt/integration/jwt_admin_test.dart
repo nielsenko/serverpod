@@ -5,6 +5,7 @@ import 'package:serverpod_auth_core_server/serverpod_auth_core_server.dart';
 import 'package:test/test.dart';
 
 import '../../serverpod_test_tools.dart';
+import '../../test_util/capture_console_output.dart';
 
 void main() {
   final jwt = Jwt(
@@ -763,6 +764,67 @@ void main() {
               expect(refreshTokens, isEmpty);
             },
           );
+        },
+      );
+    },
+  );
+
+  withServerpod(
+    'Given session logs written to the console at debug level,',
+    enableSessionLogging: true,
+    configOverride: (final config) => config.copyWith(
+      sessionLogs: config.sessionLogs.copyWith(
+        consoleEnabled: true,
+        consoleLogFormat: ConsoleLogFormat.text,
+      ),
+    ),
+    (final sessionBuilder, final endpoints) {
+      setUp(() async {
+        final serverpod = Serverpod.instance;
+        final settings = serverpod.runtimeSettings;
+        await serverpod.updateRuntimeSettings(
+          settings.copyWith(
+            logSettings: settings.logSettings.copyWith(
+              logLevel: LogLevel.debug,
+            ),
+          ),
+        );
+        addTearDown(() => serverpod.updateRuntimeSettings(settings));
+      });
+
+      test(
+        'when rotating a refresh token with a corrupted fixed secret, '
+        'then the failure is logged without the fixed secret',
+        () async {
+          final session = sessionBuilder.build();
+          final authUser = await jwt.authUsers.create(session);
+          final authSuccess = await jwt.createTokens(
+            session,
+            authUserId: authUser.id,
+            scopes: {},
+            method: 'test',
+          );
+          final parts = authSuccess.refreshToken!.split(':');
+          final corruptedFixedSecret =
+              '${parts[2].substring(0, parts[2].length - 1)}*';
+          parts[2] = corruptedFixedSecret;
+
+          final output = await captureConsoleOutput(() async {
+            await expectLater(
+              jwtAdmin.rotateRefreshToken(
+                session,
+                refreshToken: parts.join(':'),
+              ),
+              throwsA(isA<RefreshTokenMalformedServerException>()),
+            );
+            await session.close();
+          });
+
+          expect(
+            output,
+            contains('Received malformed refresh token'),
+          );
+          expect(output, isNot(contains(corruptedFixedSecret)));
         },
       );
     },
