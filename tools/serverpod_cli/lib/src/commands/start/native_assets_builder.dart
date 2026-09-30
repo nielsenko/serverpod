@@ -59,12 +59,17 @@ sealed class NativeAssetsApplyOutcome {
 }
 
 /// Hooks ran (or were skipped) and the manifest is up to date on [compiler].
-/// [restarted] is `true` when the builder restarted [KernelCompiler] because
-/// the manifest changed; the caller should treat the next compile as a full
-/// one.
+/// [manifestChanged] is `true` when the manifest differs from the previous
+/// one, including one left on disk by an earlier run. [restarted] is `true`
+/// when the builder restarted [KernelCompiler] because of that change; the
+/// caller should treat the next compile as a full one.
 class NativeAssetsApplySuccess extends NativeAssetsApplyOutcome {
+  final bool manifestChanged;
   final bool restarted;
-  const NativeAssetsApplySuccess({this.restarted = false});
+  const NativeAssetsApplySuccess({
+    this.manifestChanged = false,
+    this.restarted = false,
+  });
 }
 
 /// Hooks failed; [message] is a short, user-facing summary.
@@ -155,7 +160,10 @@ class NativeAssetsBuilder implements NativeAssetsApplier {
 
   Future<hr.PackageLayout>? _packageLayoutFuture;
   Future<hr.NativeAssetsBuildRunner>? _runnerFuture;
-  String? _lastManifestContent;
+
+  /// Seeded from disk, so the first [build] compares against the manifest
+  /// the cached kernel was compiled with.
+  late String? _lastManifestContent = _readManifest();
   List<EncodedAsset>? _lastEncodedAssets;
 
   /// Bridges `hooks_runner`'s `Logger` records into the serverpod CLI [log].
@@ -173,6 +181,14 @@ class NativeAssetsBuilder implements NativeAssetsApplier {
   /// Path of the manifest yaml this builder writes (whether or not it has
   /// been written yet).
   String get manifestPath => p.join(outputDir, 'native_assets.yaml');
+
+  String? _readManifest() {
+    try {
+      return File(manifestPath).readAsStringSync();
+    } on FileSystemException {
+      return null;
+    }
+  }
 
   /// Drops the cached package layout and build runner so the next [build]
   /// re-reads `package_config.json` and re-discovers build-hook packages. Call
@@ -353,11 +369,19 @@ class NativeAssetsBuilder implements NativeAssetsApplier {
         :final manifestPath,
         :final manifestChanged,
       ):
+        // Before the first start the Frontend Server needs the manifest
+        // whether or not it changed.
+        if (!compiler.isStarted) {
+          compiler.nativeAssetsPath = manifestPath;
+          return NativeAssetsApplySuccess(manifestChanged: manifestChanged);
+        }
         if (!manifestChanged) return const NativeAssetsApplySuccess();
         compiler.nativeAssetsPath = manifestPath;
-        if (!compiler.isStarted) return const NativeAssetsApplySuccess();
         await compiler.restart();
-        return const NativeAssetsApplySuccess(restarted: true);
+        return const NativeAssetsApplySuccess(
+          manifestChanged: true,
+          restarted: true,
+        );
     }
   }
 }

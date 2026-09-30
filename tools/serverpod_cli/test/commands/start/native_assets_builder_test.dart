@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:package_config/package_config.dart' as pc;
 import 'package:path/path.dart' as p;
+import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
 import 'package:serverpod_cli/src/commands/start/native_assets_builder.dart';
 import 'package:test/test.dart';
 
@@ -232,6 +233,41 @@ output.assets.data.add(
         },
         timeout: const Timeout(Duration(minutes: 2)),
       );
+
+      test(
+        'when a new builder applies the same assets as an earlier run, '
+        'then the manifest is unchanged and still given to the compiler',
+        () async {
+          await builder.build();
+          final compiler = KernelCompiler(
+            entryPoint: p.join(tempDir.path, 'bin', 'main.dart'),
+          );
+
+          final outcome = await _newBuilder(builder).applyTo(compiler);
+
+          expect(outcome, isA<NativeAssetsApplySuccess>());
+          final success = outcome as NativeAssetsApplySuccess;
+          expect(success.manifestChanged, isFalse);
+          expect(compiler.nativeAssetsPath, builder.manifestPath);
+        },
+        timeout: const Timeout(Duration(minutes: 2)),
+      );
+
+      test(
+        'when a new builder runs after the last build-hook package was '
+        'removed, then the manifest of the earlier run is torn down',
+        () async {
+          await builder.build();
+          File(p.join(tempDir.path, 'hook', 'build.dart')).deleteSync();
+
+          final outcome = await _newBuilder(builder).build();
+
+          expect(outcome, isA<NativeAssetsBuildSuccess>());
+          expect((outcome as NativeAssetsBuildSuccess).manifestChanged, isTrue);
+          expect(File(builder.manifestPath).existsSync(), isFalse);
+        },
+        timeout: const Timeout(Duration(minutes: 2)),
+      );
     },
     skip: Platform.isWindows
         ? 'hooks_runner subprocesses keep .dart_tool handles open on Windows '
@@ -456,6 +492,15 @@ String _encodeEntry(Map<String, Object?> entry) {
 }
 
 /// Resolves the dart executable from the SDK currently running these tests.
+/// A builder for the same project as [builder], as in a later session.
+NativeAssetsBuilder _newBuilder(NativeAssetsBuilder builder) =>
+    NativeAssetsBuilder(
+      dartExecutable: builder.dartExecutable,
+      serverDir: builder.serverDir,
+      projectRoot: builder.projectRoot,
+      outputDir: builder.outputDir,
+    );
+
 String _dartExecutable() {
   final exe = Platform.resolvedExecutable;
   // When tests run under `dart test`, resolvedExecutable is dart itself.
