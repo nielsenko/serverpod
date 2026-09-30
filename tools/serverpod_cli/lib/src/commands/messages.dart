@@ -54,6 +54,9 @@ const cachedBuildCrashedOnBoot =
 const serverStarted = '✓ Server started.';
 const serverReloaded = '✓ Server reloaded.';
 const serverRestarted = '✓ Server restarted.';
+const serverRunsLastGoodBuild =
+    'The server keeps running the last successful build until the errors '
+    'are fixed.';
 const serverNativeAssetsChanged =
     'Server native assets changed. Restarting the server...';
 const browserRefreshTriggered = '✓ Browser refresh triggered.';

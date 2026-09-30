@@ -73,6 +73,42 @@ class _FakeCompiler extends Fake implements KernelCompiler {
   Future<void> dispose() async => calls.add('dispose');
 }
 
+/// A compiler whose full compile rewrites a real [outputDill] with
+/// [compiledBytes], as after a boot from the cached kernel.
+class _CachedBootCompiler extends _FakeCompiler {
+  @override
+  final String outputDill;
+  List<int> compiledBytes = const [];
+
+  @override
+  bool needsFullCompile = true;
+
+  _CachedBootCompiler(this.outputDill) {
+    nextCompileResult = _successResult(dillOutput: outputDill);
+  }
+
+  @override
+  Future<CompileResult> compile({
+    Set<String> changedPaths = const {},
+    bool invalidatePackageConfig = false,
+  }) async {
+    final result = await super.compile(
+      changedPaths: changedPaths,
+      invalidatePackageConfig: invalidatePackageConfig,
+    );
+    if (result.errorCount == 0) {
+      File(outputDill).writeAsBytesSync(compiledBytes);
+    }
+    return result;
+  }
+
+  @override
+  Future<void> accept() async {
+    await super.accept();
+    needsFullCompile = false;
+  }
+}
+
 /// Stand-in for [NativeAssetsBuilder] so the session's hook/restart bookkeeping
 /// can be driven without running real build hooks. [nextOutcome] controls what
 /// the next [applyTo] reports; `restarted: true` simulates a native-assets
@@ -2880,6 +2916,100 @@ class Counter {
 
         expect(factoryCalls, isEmpty);
         expect(compiler.calls, isEmpty);
+        expect(server.calls, isEmpty);
+      },
+    );
+  });
+
+  group('Given a session booted from the cached kernel,', () {
+    late Directory tempDir;
+    late _CachedBootCompiler cachedCompiler;
+    late WatchSession cachedSession;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('watch_session_test_');
+      final dill = p.join(tempDir.path, 'server.dill');
+      File(dill).writeAsBytesSync([1, 2, 3]);
+      cachedCompiler = _CachedBootCompiler(dill);
+      cachedSession = buildSession(
+        compiler: cachedCompiler,
+        initialServer: server,
+      );
+    });
+
+    tearDown(() => tempDir.deleteSync(recursive: true));
+
+    test(
+      'when the compile after boot produces the same kernel, '
+      'then the server is not reloaded',
+      () async {
+        cachedCompiler.compiledBytes = [1, 2, 3];
+
+        await cachedSession.compileAfterCachedBoot();
+
+        expect(cachedCompiler.calls, ['compile', 'accept']);
+        expect(server.calls, isEmpty);
+      },
+    );
+
+    test(
+      'when the compile after boot produces a different kernel, '
+      'then the server hot reloads it',
+      () async {
+        cachedCompiler.compiledBytes = [1, 2, 4];
+
+        await cachedSession.compileAfterCachedBoot();
+
+        expect(server.calls, ['reload:${cachedCompiler.outputDill}']);
+        expect(factoryCalls, isEmpty);
+      },
+    );
+
+    test(
+      'when the hot reload of a different kernel fails, '
+      'then the server restarts from that kernel without recompiling',
+      () async {
+        cachedCompiler.compiledBytes = [1, 2, 4];
+        server.reloadSuccess = false;
+
+        await cachedSession.compileAfterCachedBoot();
+
+        expect(cachedCompiler.calls, ['compile', 'accept']);
+        expect(server.calls, ['reload:${cachedCompiler.outputDill}', 'stop']);
+        expect(factoryCalls, ['createServer:${cachedCompiler.outputDill}']);
+      },
+    );
+
+    test(
+      'when the compile after boot fails, '
+      'then the server keeps running the cached kernel',
+      () async {
+        cachedCompiler.nextCompileResult = _failResult();
+
+        await cachedSession.compileAfterCachedBoot();
+
+        expect(cachedCompiler.calls, ['compile', 'reject']);
+        expect(server.calls, isEmpty);
+        expect(factoryCalls, isEmpty);
+      },
+    );
+
+    test(
+      'when a file change compiles first, '
+      'then the compile after boot does nothing',
+      () async {
+        cachedCompiler.nextIncrementalResult = _successResult(
+          dillOutput: cachedCompiler.outputDill,
+        );
+        await cachedSession.handleFileChange(
+          FileChangeEvent(dartFiles: {'/lib/a.dart'}),
+        );
+        cachedCompiler.calls.clear();
+        server.calls.clear();
+
+        await cachedSession.compileAfterCachedBoot();
+
+        expect(cachedCompiler.calls, isEmpty);
         expect(server.calls, isEmpty);
       },
     );

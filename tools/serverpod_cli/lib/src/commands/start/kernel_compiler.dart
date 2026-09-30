@@ -71,6 +71,10 @@ class KernelCompiler {
   /// behind if compilation fails or the session dies mid-compile.
   String get _compileMarkerPath => '$outputDill.compiling';
 
+  /// Whether [outputDill] is the kernel of the last successful compile.
+  bool get hasBootableCache =>
+      File(outputDill).existsSync() && !File(_compileMarkerPath).existsSync();
+
   /// Start the Frontend Server process.
   ///
   /// This starts the server in resident mode, ready to receive compile

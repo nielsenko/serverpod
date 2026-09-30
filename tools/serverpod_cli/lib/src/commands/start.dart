@@ -620,23 +620,17 @@ NativeAssetsBuilder _createNativeAssetsBuilder({
 }
 
 /// Runs build hooks via [builder] and applies the result to [compiler].
-/// Returns false on hook failure (an error has been logged).
-///
-/// Wraps [NativeAssetsBuilder.applyTo] for the start.dart paths that don't
-/// care about the restart-distinction (initial-build callers and the IDE
-/// reload callback). The watch-loop and migration paths switch on the
-/// outcome directly to read [NativeAssetsApplySuccess.restarted].
-Future<bool> _runHooksFor(
+/// Returns null on hook failure (an error has been logged).
+Future<NativeAssetsApplySuccess?> _runHooksFor(
   NativeAssetsBuilder builder,
   KernelCompiler compiler,
 ) async {
-  final outcome = await builder.applyTo(compiler);
-  switch (outcome) {
-    case NativeAssetsApplySuccess():
-      return true;
+  switch (await builder.applyTo(compiler)) {
+    case final NativeAssetsApplySuccess success:
+      return success;
     case NativeAssetsApplyFailure(:final message):
       log.error(message);
-      return false;
+      return null;
   }
 }
 
@@ -1152,19 +1146,25 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         serverpodToolDir: serverpodToolDir,
         dartExecutable: localCompiler.dartExecutable,
       );
-      late final bool hooksOk;
+      NativeAssetsApplySuccess? hooks;
       await log.progress('Running build hooks', () async {
-        hooksOk = await _runHooksFor(localBuilder, localCompiler);
-        return hooksOk;
+        hooks = await _runHooksFor(localBuilder, localCompiler);
+        return hooks != null;
       });
-      if (!hooksOk) {
+      final nativeAssetsChanged = hooks?.manifestChanged;
+      if (nativeAssetsChanged == null) {
         await rollback();
         return const WatchLoopAborted(1);
       }
 
       await localCompiler.start();
 
-      if (buildOk) {
+      // A reload never re-resolves native assets, so a changed manifest
+      // needs a kernel compiled against it before the pod boots. Otherwise
+      // boot the last good kernel and let the session catch up.
+      final bootFromCache =
+          localCompiler.hasBootableCache && !nativeAssetsChanged;
+      if (buildOk && !bootFromCache) {
         if (!await localCompiler.compileFromCache()) {
           // Back to the empty state, so recovery does a full compile.
           await localCompiler.reject();
@@ -1397,15 +1397,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
 
     unawaited(session.done.then(shutdown.complete));
 
-    var compilerWarmed = false;
-    void warmCompiler() {
-      // Both the immediate and the post-launch path can reach here (a
-      // `--flutter` session that auto-launches nothing takes the first and
-      // then still runs the second when a client attaches). One turn only.
-      if (compilerWarmed || !session.isRunning) return;
-      compilerWarmed = true;
-      unawaited(session.warmCompiler());
-    }
+    if (session.isRunning) unawaited(session.compileAfterCachedBoot());
 
     runnerApi.bindStack(
       session: session,
@@ -1440,13 +1432,9 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       unawaited(
         // Future.sync: launchAutoLaunchApps throws synchronously on a disposed
         // session, which no handler attached to its result would ever see.
-        Future.sync(session.launchAutoLaunchApps)
-            .catchError(
-              (Object e) =>
-                  log.warning('Launching the Flutter apps failed: $e'),
-            )
-            // Whether or not they came up, nothing is waiting on the chain now.
-            .whenComplete(warmCompiler),
+        Future.sync(session.launchAutoLaunchApps).catchError(
+          (Object e) => log.warning('Launching the Flutter apps failed: $e'),
+        ),
       );
     }
 
@@ -1455,13 +1443,6 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         clientAttached = true;
         launchAppsIfReady();
       };
-    }
-    // Deferring the warm-up to the auto-launch only makes sense when there is
-    // one coming. `--flutter` on a project that configures no auto-launch app
-    // would otherwise wait on a launch that never happens.
-    if (!launchFlutterApp ||
-        !flutterManager.apps.any((app) => app.autoLaunch)) {
-      warmCompiler();
     }
 
     McpSocketServer? mcpSocket = McpSocketServer(serverDir: serverDir);

@@ -623,26 +623,38 @@ class WatchSession {
     return true;
   }
 
-  /// Compiles once in the background after the server booted from the cached
-  /// dill, so the first edit is an increment instead of a full compile.
+  /// Compiles on top of the cached dill the server booted from, and reloads
+  /// the server if the sources changed while no session was running.
   ///
-  /// Queued on [_chain]: a file change that gets there first does the compile
-  /// itself and this becomes a no-op. Rewriting the dill under the running
-  /// pod is safe - the VM copies the kernel into memory at load and never
-  /// reads the file again. Never throws.
-  Future<void> warmCompiler() => _chain(() async {
+  /// Queued on [_chain]: a file change that gets there first compiles and
+  /// reloads itself, and this becomes a no-op. Rewriting the dill under the
+  /// running pod is safe, as the VM reads it whole before the VM service is
+  /// up. Never throws.
+  Future<void> compileAfterCachedBoot() => _chain(() async {
     final compiler = _compiler;
     if (compiler == null || !compiler.needsFullCompile) return;
     if (_state == SessionState.disposed) return;
     try {
+      final booted = await File(compiler.outputDill).readAsBytes();
       final result = await compileWithProgress(
-        'Warming the compiler',
+        'Compiling server',
         compiler,
         rejectOnFailure: true,
       );
-      if (result != null) await compiler.accept();
+      if (result == null) {
+        log.warning(serverRunsLastGoodBuild);
+        return;
+      }
+      await compiler.accept();
+      // The Frontend Server output is deterministic, so equal bytes mean
+      // the server already runs this code.
+      final dill = result.dillOutput!;
+      if (_sameBytes(booted, await File(dill).readAsBytes())) return;
+      if (_state == SessionState.disposed) return;
+      // A full kernel, so a rejected reload can restart from it directly.
+      if (!await _reload(dill)) await _restartServer(dill);
     } catch (e) {
-      log.debug('Compiler warm-up failed: $e');
+      log.warning('Compiling after the cached boot failed: $e');
     }
   });
 
@@ -946,4 +958,12 @@ class WatchSession {
       }),
     );
   }
+}
+
+bool _sameBytes(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }

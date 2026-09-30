@@ -13,4 +13,3 @@ extension GeneratorConfigFileWatcher on GeneratorConfig {
     ...generatedSharedModelsPaths.map(p.absolute),
   };
 }
-
