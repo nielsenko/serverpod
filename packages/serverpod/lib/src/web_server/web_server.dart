@@ -242,6 +242,7 @@ class WebServer {
       await _reloadTemplatesIfNeeded();
       final result = await next(req);
       if (result is! Response || result.statusCode != 200) return result;
+      if (_skipDevAutoRefreshProperty[req] == true) return result;
 
       final mimeType = result.body.bodyType?.mimeType;
       if (mimeType != MimeType.html) return result;
@@ -360,6 +361,18 @@ class _Deferred<T> {
 }
 
 final _sessionProperty = ContextProperty<_Deferred<Session>>();
+
+final _skipDevAutoRefreshProperty = ContextProperty<bool>();
+
+/// Development page refresh related extension methods for [Request].
+extension DevAutoRefreshEx on Request {
+  /// Leaves the development page refresh script out of the response to this
+  /// request.
+  ///
+  /// For routes whose pages reload through their own channel, such as a web
+  /// framework that keeps client state across a reload.
+  void skipDevAutoRefresh() => _skipDevAutoRefreshProperty[this] = true;
+}
 
 /// [Session] related extension methods for [Request].
 extension SessionEx on Request {
