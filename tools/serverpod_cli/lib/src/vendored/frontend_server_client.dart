@@ -13,6 +13,9 @@
  * Added optional `nativeAssetsPath` parameter to forward the
  * `--native-assets <path>` flag, used to feed `frontend_server` the manifest
  * produced by `package:hooks_runner` so `@Native` lookups resolve correctly.
+ * Accepts an entrypoint given as a URI (such as `package:`), extra
+ * arguments for other targets (such as `dartdevc`), and `recompile-restart`
+ * requests.
  *
  * Copyright 2020 The Dart Authors. All rights reserved.
  *
@@ -81,9 +84,10 @@ class FrontendServerClient {
     String target = 'vm',
     String? packagesJson,
     String? nativeAssetsPath,
+    List<String> extraArguments = const [],
     IOSink? errorSink,
   }) async {
-    final entrypointUri = Uri.file(p.absolute(entrypoint));
+    final entrypointUri = _entrypointUri(entrypoint);
     final packageConfigUri = packagesJson == null
         ? null
         : Uri.file(p.absolute(packagesJson));
@@ -100,6 +104,7 @@ class FrontendServerClient {
         p.absolute(nativeAssetsPath),
       ],
       '--incremental',
+      ...extraArguments,
     ];
     final exe = Platform.isWindows ? '.exe' : '';
     final Process feServer;
@@ -137,9 +142,18 @@ class FrontendServerClient {
     );
   }
 
-  Future<CompileResult> compile([List<Uri>? invalidatedUris]) async {
+  /// Compiles the entrypoint, or recompiles [invalidatedUris] after the first
+  /// compile.
+  ///
+  /// With [restart], a recompile is sent as `recompile-restart`, which skips
+  /// the checks a hot reload needs. It has no effect on the first compile.
+  Future<CompileResult> compile([
+    List<Uri>? invalidatedUris,
+    bool restart = false,
+  ]) async {
     final action = switch (_state) {
       _ClientState.waitingForFirstCompile => 'compile',
+      _ClientState.waitingForRecompile when restart => 'recompile-restart',
       _ClientState.waitingForRecompile => 'recompile',
       _ => throw StateError('Cannot compile in state $_state'),
     };
@@ -147,7 +161,7 @@ class FrontendServerClient {
 
     try {
       final command = StringBuffer('$action $_entrypoint');
-      if (action == 'recompile') {
+      if (action != 'compile') {
         // After `reset()`, FES discards its incremental state but still
         // requires at least one invalidated URI. Default to the entry point
         // so callers can simply call `compile()` after `reset()`.
@@ -276,6 +290,17 @@ class CompileResult {
 @internal
 extension CompileResultInternal on CompileResult {
   static const create = CompileResult._;
+}
+
+/// The URI to pass to the frontend server for [entrypoint].
+///
+/// A URI with a scheme, such as `package:`, is used as given. Anything else is
+/// a file path. A Windows drive letter is a one-letter scheme, so it counts as
+/// a path.
+Uri _entrypointUri(String entrypoint) {
+  final uri = Uri.tryParse(entrypoint);
+  if (uri != null && uri.scheme.length > 1) return uri;
+  return Uri.file(p.absolute(entrypoint));
 }
 
 enum _ClientState {
