@@ -18,6 +18,7 @@ import 'package:serverpod_cli/src/commands/serverpod_command.dart';
 import 'package:serverpod_cli/src/commands/serverpod_command_runner.dart';
 import 'package:serverpod_cli/src/commands/start/file_watcher.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_app_manager.dart';
+import 'package:serverpod_cli/src/commands/start/jaspr/jaspr_apps.dart';
 import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
 import 'package:serverpod_cli/src/commands/start/log_history.dart';
 import 'package:serverpod_cli/src/commands/start/mcp_socket.dart';
@@ -1205,6 +1206,11 @@ Future<WatchLoopSetupResult> setupWatchLoop({
     // Null reloads the pod on every package_config.json change.
     PackageDependencyTracker? serverDependencyTracker;
     final entryPoint = p.join(serverDir, target);
+    final jasprAppConfigs = loadJasprApps(
+      serverDir: serverDir,
+      serverpodToolDir: serverpodToolDir,
+    );
+    JasprApps? jasprApps;
     if (watch) {
       final initialDill = p.join(serverpodToolDir, 'server.dill');
       // One root for compiler, hooks and watcher. KernelCompiler says why.
@@ -1255,6 +1261,28 @@ Future<WatchLoopSetupResult> setupWatchLoop({
             );
 
       await localCompiler.start();
+
+      // Jaspr's generated options are inputs of the server compile, and its
+      // browser code is ready before the server boots, so the first page can
+      // hydrate.
+      if (jasprAppConfigs.isNotEmpty) {
+        final localJasprApps = jasprApps = JasprApps(
+          jasprAppConfigs,
+          packagesPath: packageConfigPath,
+          sdkRoot: resolvedDartSdk,
+          dartExecutable: localCompiler.dartExecutable,
+          sdkCacheDir: p.join(serverpodToolDir, 'web_sdk'),
+        );
+        final rollbackBeforeJaspr = rollback;
+        rollback = ({int exitCode = 1}) async {
+          await localJasprApps.dispose();
+          await rollbackBeforeJaspr(exitCode: exitCode);
+        };
+        await log.progress(
+          'Compiling Jaspr apps for the browser',
+          localJasprApps.start,
+        );
+      }
 
       if (buildOk) {
         if (!await localCompiler.compileIfNeeded({
@@ -1334,9 +1362,16 @@ Future<WatchLoopSetupResult> setupWatchLoop({
         stdoutSink: serverStdoutSink,
         stderrSink: serverStderrSink,
         onDispose: logHistory.discardActiveServerScopes,
-        environment: portOverrides.isEmpty
-            ? null
-            : portOverrideEnvironment(portOverrides),
+        environment: {
+          if (portOverrides.isNotEmpty)
+            ...portOverrideEnvironment(portOverrides),
+          // Only when the runner compiles them. Without, the route serves the
+          // production build.
+          if (jasprApps != null)
+            jasprAppsEnvironmentVariable: jasprAppsEnvironment(
+              jasprAppConfigs,
+            ),
+        },
       );
       await serverProcess.start(dillPath: dillPath);
       await serverProcess.connectToVmService();
@@ -1419,6 +1454,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
           flutterApps: currentApps,
           serverDartToolDir: serverDartToolDir,
           flutterPackageGraphPaths: flutterPackageGraphPaths,
+          extraPaths: jasprApps?.watchPaths ?? const [],
         ),
         // Exact files, so one resolution's change never runs another's action.
         packageConfigPath: serverDartToolDir == null
@@ -1460,6 +1496,7 @@ Future<WatchLoopSetupResult> setupWatchLoop({
       generatedDirPaths: config.generatedDirPaths,
       serverDependencyTracker: serverDependencyTracker,
       flutterManager: flutterManager,
+      jasprApps: jasprApps,
       flutterAppsLoader: () async {
         await flutterManager.loadApps();
         runnerApi.recordFlutterApps(flutterManager.apps.toList());
@@ -1690,8 +1727,10 @@ Set<String> buildWatchPaths({
   List<FlutterAppConfig> flutterApps = const [],
   String? serverDartToolDir,
   Iterable<String> flutterPackageGraphPaths = const [],
+  Iterable<String> extraPaths = const [],
 }) {
   return {
+    ...extraPaths.map(p.absolute),
     p.absolute(p.joinAll(config.libSourcePathParts)),
     ...config.sharedModelsLibSourcePaths.map(p.absolute),
     p.absolute(p.joinAll([...config.clientPackagePathParts, 'lib'])),

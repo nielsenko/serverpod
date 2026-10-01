@@ -283,6 +283,33 @@ class ServerProcess {
     );
   }
 
+  /// Asks the browsers of the server's Jaspr apps to reload.
+  ///
+  /// Calls the `ext.serverpod.jaspr.reloadClients` VM service extension that
+  /// `serverpod_jaspr` registers. [hotReload] loads new browser code into the
+  /// running page first, and [restart] loads the page from scratch.
+  /// [generations] is the generation of each app's browser code by app id,
+  /// which the server writes into the pages it renders from now on.
+  Future<void> reloadJasprClients({
+    bool hotReload = false,
+    bool restart = false,
+    Map<String, int> generations = const {},
+  }) async {
+    final vmService = _vmService;
+    final isolateId = _mainIsolateId;
+    if (vmService == null || isolateId == null) return;
+
+    await vmService.callServiceExtension(
+      'ext.serverpod.jaspr.reloadClients',
+      isolateId: isolateId,
+      args: {
+        'hotReload': '$hotReload',
+        'restart': '$restart',
+        'generations': jsonEncode(generations),
+      },
+    );
+  }
+
   /// Stops the server process gracefully with SIGTERM.
   ///
   /// Cancels signal forwarding first to prevent double-delivery (e.g. the
