@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:serverpod_cli/src/commands/messages.dart';
 import 'package:serverpod_cli/src/commands/start/file_watcher.dart';
 import 'package:serverpod_cli/src/commands/start/flutter_app_manager.dart';
+import 'package:serverpod_cli/src/commands/start/jaspr/jaspr_apps.dart';
 import 'package:serverpod_cli/src/commands/start/kernel_compiler.dart';
 import 'package:serverpod_cli/src/commands/start/native_assets_builder.dart';
 import 'package:serverpod_cli/src/commands/start/package_dependency_tracker.dart';
@@ -100,6 +101,9 @@ class WatchSession {
   final FlutterAppManager? _flutterManager;
   final FlutterAppsLoader? _flutterAppsLoader;
 
+  /// The Jaspr apps whose browser code the session compiles, if any.
+  final JasprApps? _jasprApps;
+
   /// Whether the pod serves web pages, read on each reload since it can change.
   final bool Function() _servesWeb;
 
@@ -187,8 +191,10 @@ class WatchSession {
     PackageDependencyTracker? serverDependencyTracker,
     FlutterAppManager? flutterManager,
     FlutterAppsLoader? flutterAppsLoader,
+    JasprApps? jasprApps,
     bool Function() servesWeb = _alwaysServesWeb,
   }) : _compiler = compiler,
+       _jasprApps = jasprApps,
        _servesWeb = servesWeb,
        _nativeAssetsBuilder = nativeAssetsBuilder,
        _generate = generate,
@@ -249,8 +255,12 @@ class WatchSession {
       serverDepsChanged = false;
     }
 
+    // Jaspr's generated files, compiled in the cycle that generated them.
+    final dartFiles = {...event.dartFiles}
+      ..removeWhere((f) => _jasprApps?.isSettledGenerated(f) ?? false);
+
     final hasDartChanges =
-        event.dartFiles.isNotEmpty ||
+        dartFiles.isNotEmpty ||
         event.modelFiles.isNotEmpty ||
         serverDepsChanged;
 
@@ -266,7 +276,10 @@ class WatchSession {
       if (event.flutterDependenciesChanged || event.pubspecChanged) {
         await _reloadOrRestartFlutterApps(changedPaths: const []);
       }
-      if (event.staticFilesChanged) await _notifyBrowserRefresh();
+      if (event.staticFilesChanged) {
+        await _notifyBrowserRefresh();
+        await _reloadJasprClients(JasprClientUpdate.restart);
+      }
       return;
     }
 
@@ -274,7 +287,7 @@ class WatchSession {
     // (only needs compilation).
     final sourceDartFiles = <String>{};
     final generatedDartFiles = <String>{};
-    for (final f in event.dartFiles) {
+    for (final f in dartFiles) {
       if (_isGenerated(f)) {
         generatedDartFiles.add(f);
       } else {
@@ -323,12 +336,36 @@ class WatchSession {
       genOutputFiles = genResult.generatedFiles;
     }
 
+    final jasprApps = _jasprApps;
+    if (jasprApps != null) {
+      genOutputFiles = {
+        ...genOutputFiles,
+        ...await jasprApps.generate(sourceDartFiles),
+      };
+    }
+
+    // Paths a failed server compile parked are the browser code's too: its
+    // compiler does not see them until this cycle's recompile.
+    final jasprChanges = {
+      ..._pendingPaths,
+      ...sourceDartFiles,
+      ...genOutputFiles,
+      ...generatedDartFiles,
+    };
+
     // Degraded start: no server is running yet because the project failed to
     // build at launch. Generation just succeeded (or was unnecessary), so try
     // a full compile and boot the server from scratch. A still-failing compile
-    // leaves the session degraded for the next change to retry.
+    // leaves the session degraded for the next change to retry. The browser
+    // code compiles meanwhile, and the new server process makes the pages
+    // load again.
     if (_server == null) {
-      if (await _fullCompileAndRestart()) {
+      final (booted, _) = await (
+        _fullCompileAndRestart(),
+        jasprApps?.recompile(jasprChanges) ??
+            Future.value(JasprClientUpdate.none),
+      ).wait;
+      if (booted) {
         await _restartAllFlutterApps();
         await _notifyBrowserRefresh();
       }
@@ -354,15 +391,73 @@ class WatchSession {
       ...generatedDartFiles,
     };
 
-    final reloaded = await _compileAndReload(
-      dartFiles: allDartChanges,
-      packageConfigChanged: serverDepsChanged,
-    );
+    // The browser code compiles alongside the server. Browsers reload only
+    // after both, so a hot reload never meets server HTML from older code.
+    final (reloaded, clientUpdate) = await (
+      _compileAndReload(
+        dartFiles: allDartChanges,
+        packageConfigChanged: serverDepsChanged,
+      ),
+      jasprApps?.recompile(jasprChanges) ??
+          Future.value(JasprClientUpdate.none),
+    ).wait;
     // Always refresh Flutter: flutter/lib-only changes short-circuit the server
     // compile but still need a Flutter refresh (escalated when dependencies
     // changed, otherwise a hot reload).
     await _reloadOrRestartFlutterApps(changedPaths: allDartChanges);
     if (reloaded) await _notifyBrowserRefresh();
+    await _reloadJasprClientsAfterCycle(
+      serverReloaded: reloaded,
+      serverFailed: _pendingPaths.isNotEmpty || _pendingPackageConfig,
+      clientUpdate: clientUpdate,
+    );
+  }
+
+  /// The browser update held back while the server failed to compile.
+  JasprClientUpdate _pendingClientUpdate = JasprClientUpdate.none;
+
+  /// Reloads the Jaspr pages once the server runs code that matches the
+  /// browser code.
+  ///
+  /// New browser code against the old server's markup would hydrate the
+  /// wrong components, so the update waits in [_pendingClientUpdate] until a
+  /// cycle compiles the server. A failed browser compile keeps the old code
+  /// in the pages and leaves the pending update as it is.
+  Future<void> _reloadJasprClientsAfterCycle({
+    required bool serverReloaded,
+    required bool serverFailed,
+    required JasprClientUpdate clientUpdate,
+  }) async {
+    if (clientUpdate == JasprClientUpdate.failed) return;
+    if (clientUpdate.index > _pendingClientUpdate.index) {
+      _pendingClientUpdate = clientUpdate;
+    }
+    if (serverFailed) return;
+    final update = _pendingClientUpdate;
+    if (!serverReloaded && update == JasprClientUpdate.none) return;
+    _pendingClientUpdate = JasprClientUpdate.none;
+    await _reloadJasprClients(update);
+  }
+
+  /// Asks the browsers of the Jaspr apps to show the new code.
+  ///
+  /// The page is fetched again from the server in every case, so server
+  /// rendered parts update too. [update] says what happens to the browser
+  /// code first.
+  Future<void> _reloadJasprClients(JasprClientUpdate update) async {
+    if (_jasprApps == null) return;
+    final server = _server;
+    if (server == null || !server.isVmServiceConnected) return;
+    try {
+      await server.reloadJasprClients(
+        hotReload: update == JasprClientUpdate.hotReload,
+        restart: update == JasprClientUpdate.restart,
+        generations: _jasprApps.generations,
+      );
+      log.info('Reloaded Jaspr pages (${update.name}).');
+    } catch (e) {
+      log.warning('Reloading Jaspr pages failed: $e');
+    }
   }
 
   /// Reloads the companion Flutter app config from the server's `pubspec.yaml`.
@@ -827,6 +922,7 @@ class WatchSession {
     // mustn't see a half-shut-down server VM service.
     await _flutterManager?.stopAll();
     await _compiler?.dispose();
+    await _jasprApps?.dispose();
     if (!_done.isCompleted) _done.complete(code);
   }
 
