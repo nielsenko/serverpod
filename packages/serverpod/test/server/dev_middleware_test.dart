@@ -27,6 +27,19 @@ class _HtmlRoute extends Route {
   }
 }
 
+class _SelfRefreshingHtmlRoute extends Route {
+  @override
+  FutureOr<Result> handleCall(Session session, Request request) {
+    request.skipDevAutoRefresh();
+    return Response.ok(
+      body: Body.fromString(
+        '<html><body></body></html>',
+        mimeType: MimeType.html,
+      ),
+    );
+  }
+}
+
 void main() {
   final portZeroConfig = ServerConfig(
     port: 0,
@@ -52,6 +65,7 @@ void main() {
 
       pod.webServer.addRoute(_DummyRoute(), '/dummy');
       pod.webServer.addRoute(_HtmlRoute(), '/page');
+      pod.webServer.addRoute(_SelfRefreshingHtmlRoute(), '/self-refreshing');
       pod.webServer.setDevModeForTesting(true);
 
       await pod.start();
@@ -85,6 +99,19 @@ void main() {
 
         expect(response.statusCode, 200);
         expect(response.body, contains('/__dev/version'));
+      },
+    );
+
+    test(
+      'when an HTML route that skips the dev auto-refresh is requested, '
+      'then the auto-refresh script is not injected',
+      () async {
+        final response = await http.get(
+          Uri.parse('http://localhost:$port/self-refreshing'),
+        );
+
+        expect(response.statusCode, 200);
+        expect(response.body, isNot(contains('/__dev/version')));
       },
     );
 
