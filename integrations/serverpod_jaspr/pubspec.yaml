@@ -1,0 +1,25 @@
+name: serverpod_jaspr
+description: Renders Jaspr web apps inside a Serverpod server.
+version: 4.1.0-rc.1
+repository: https://github.com/serverpod/serverpod
+homepage: https://serverpod.dev
+issue_tracker: https://github.com/serverpod/serverpod/issues
+
+environment:
+  sdk: '^3.13.0'
+
+resolution: workspace
+
+dependencies:
+  # Builds against Jaspr's next branch with the changes listed in
+  # docs/design/jaspr_in_process.md, through a dependency override until
+  # they are published.
+  jaspr: ^0.23.5
+  path: ^1.9.0
+  serverpod: 4.1.0-rc.1
+  serverpod_shared: 4.1.0-rc.1
+
+dev_dependencies:
+  http: '>=1.1.0 <2.0.0'
+  lints: '>=3.0.0 <7.0.0'
+  test: ^1.25.5
