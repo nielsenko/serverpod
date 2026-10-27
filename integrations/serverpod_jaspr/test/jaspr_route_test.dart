@@ -4,38 +4,10 @@ import 'package:http/http.dart' as http;
 import 'package:jaspr/dom.dart' show p;
 import 'package:jaspr/server.dart' as jaspr;
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod/src/generated/protocol.dart' as internal;
 import 'package:serverpod_jaspr/serverpod_jaspr.dart';
 import 'package:test/test.dart';
 
-class _EmptyEndpoints extends EndpointDispatch {
-  @override
-  void initializeEndpoints(Server server) {}
-}
-
-final _portZeroConfig = ServerConfig(
-  port: 0,
-  publicScheme: 'http',
-  publicHost: 'localhost',
-  publicPort: 0,
-);
-
-/// Starts a pod with [route] added at [path] and returns its web server port.
-Future<int> _startPod(Serverpod pod, Route route, String path) async {
-  pod.webServer.addRoute(route, path);
-  await pod.start();
-  return pod.webServer.port!;
-}
-
-Serverpod _createPod() => Serverpod(
-  [],
-  internal.Protocol(),
-  _EmptyEndpoints(),
-  config: ServerpodConfig(
-    apiServer: _portZeroConfig,
-    webServer: _portZeroConfig,
-  ),
-);
+import 'test_pod.dart';
 
 /// Renders the URL and base path Jaspr sees for the request.
 class _ShowRequest extends jaspr.StatelessComponent {
@@ -69,7 +41,7 @@ void main() {
   late Directory tempDirectory;
 
   setUp(() {
-    pod = _createPod();
+    pod = createPod();
     originalDirectory = Directory.current;
     tempDirectory = Directory.systemTemp.createTempSync('serverpod_jaspr');
     Directory.current = tempDirectory;
@@ -86,7 +58,7 @@ void main() {
     'when a page is requested, '
     'then the response is the HTML document Jaspr rendered.',
     () async {
-      final port = await _startPod(
+      final port = await startPod(
         pod,
         JasprRoute(
           'website',
@@ -112,7 +84,7 @@ void main() {
     'then Jaspr sees the URL relative to the mount and the mount as its '
     'base path.',
     () async {
-      final port = await _startPod(
+      final port = await startPod(
         pod,
         JasprRoute(
           'website',
@@ -136,7 +108,7 @@ void main() {
     'then the component reads it by its lowercase name and the header it '
     'sets reaches the response next to the content type.',
     () async {
-      final port = await _startPod(
+      final port = await startPod(
         pod,
         JasprRoute(
           'website',
@@ -162,7 +134,7 @@ void main() {
     'when a page is requested, '
     'then the builder receives the session of the web call.',
     () async {
-      final port = await _startPod(
+      final port = await startPod(
         pod,
         JasprRoute(
           'website',
@@ -186,7 +158,7 @@ void main() {
     () async {
       Directory('web/website').createSync(recursive: true);
       File('web/website/main.client.dart.js').writeAsStringSync('main();');
-      final port = await _startPod(
+      final port = await startPod(
         pod,
         JasprRoute(
           'website',
@@ -210,7 +182,7 @@ void main() {
     'when that file is requested, '
     'then the response is 404 instead of a rendered page.',
     () async {
-      final port = await _startPod(
+      final port = await startPod(
         pod,
         JasprRoute(
           'website',
