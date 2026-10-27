@@ -8,6 +8,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:serverpod_shared/serverpod_shared.dart' show JasprAppLocation;
 
 import 'dev_apps.dart';
+import 'dev_daemon.dart';
 import 'dev_restart_script.dart';
 
 /// Builds the root component of a Jaspr app for a page request.
@@ -31,8 +32,11 @@ typedef JasprAppBuilder = FutureOr<jaspr.Component> Function(
 /// than `html`, `htm` or `xml`, are served from the app's files.
 ///
 /// Under `serverpod start`, the files are the browser code the runner
-/// compiles and the app package's `web` directory. Otherwise the files are
-/// the output of `jaspr_build` in the server's `web/<appId>` directory.
+/// compiles and the app package's `web` directory. With a
+/// `jaspr daemon --skip-server` named by `JASPR_PROXY_PORT`, the files are
+/// forwarded to it instead and the daemon reloads the pages. Otherwise the
+/// files are the output of `jaspr_build` in the server's `web/<appId>`
+/// directory.
 class JasprRoute extends Route {
   /// The app's identifier in the server's `jaspr_apps` configuration.
   final String appId;
@@ -45,6 +49,12 @@ class JasprRoute extends Route {
 
   final JasprAppLocation? _devApp;
 
+  final JasprDaemon? _daemon;
+
+  // Set once the router has taken the route, so a replay reloads the pages
+  // and the first injection does not.
+  bool _injected = false;
+
   /// [options] is usually the generated `defaultServerOptions` getter.
   JasprRoute(
     this.appId, {
@@ -53,9 +63,13 @@ class JasprRoute extends Route {
   }) : _build = build,
        _options = options,
        _devApp = devJasprApps?[appId],
+       _daemon = JasprDaemon.fromEnvironment(),
        super(methods: {Method.get, Method.head, Method.post}, path: '/**');
 
+  /// Whether `serverpod start` compiles the browser code.
   bool get _isDev => _devApp != null;
+
+  bool get _inDevelopment => _isDev || _daemon != null;
 
   late final List<Directory> _fileDirs = switch (_devApp) {
     final app? => [
@@ -70,8 +84,11 @@ class JasprRoute extends Route {
   @override
   void injectIn(RelicRouter router) {
     // Relic replays this after every hot reload, so Jaspr clears the caches
-    // it built from the old code here.
+    // it built from the old code here, and a daemon reloads the browsers
+    // when Jaspr asks.
     jaspr.ServerApp.reassemble();
+    if (_daemon != null && _injected) jaspr.ServerApp.reloadClients();
+    _injected = true;
     super.injectIn(router);
   }
 
@@ -81,7 +98,7 @@ class JasprRoute extends Route {
     final last = segments.isEmpty ? '' : segments.last;
 
     if (last == serverInstancePath) {
-      return _isDev ? serverInstanceResponse() : Response.notFound();
+      return _inDevelopment ? serverInstanceResponse() : Response.notFound();
     }
     if (req.method == Method.post) return Response(405);
     if (_isFile(last)) return _serveFile(req);
@@ -102,7 +119,7 @@ class JasprRoute extends Route {
       options: _options(),
       loadFile: _loadFile,
     );
-    if (!_isDev) return _toResponse(rendered);
+    if (!_inDevelopment) return _toResponse(rendered);
 
     // Jaspr's client reloads the page itself, keeping its state. Only a new
     // server process, which drops its connection, needs a full reload.
@@ -132,6 +149,7 @@ class JasprRoute extends Route {
   }
 
   Future<Result> _serveFile(Request req) async {
+    if (_daemon case final daemon?) return daemon.forward(req);
     for (final dir in _fileDirs) {
       final handler = _fileHandler(dir);
       if (handler == null) continue;
@@ -153,6 +171,7 @@ class JasprRoute extends Route {
   // Used by Jaspr for `Document.template`, which reads
   // `<name>.template.html` from the app's files.
   Future<String?> _loadFile(String name) async {
+    if (_daemon case final daemon?) return daemon.loadFile(name);
     for (final dir in _fileDirs) {
       final file = File(p.join(dir.path, name));
       if (await file.exists()) return file.readAsString();
