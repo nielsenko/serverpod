@@ -9,6 +9,7 @@ import '../../interface/database_pool_manager.dart';
 import '../../interface/serialization_manager.dart';
 import 'embedded_postgres_resolver.dart';
 import 'pgvector_encoder.dart';
+import 'postgres_tls_connector.dart';
 import 'value_encoder.dart';
 
 /// Configuration for connecting to the Postgresql database.
@@ -72,6 +73,7 @@ class PostgresPoolManager implements DatabasePoolManager {
         maxConnectionCount: config.maxConnectionCount,
         queryTimeout: const Duration(minutes: 1),
         sslMode: config.requireSsl ? pg.SslMode.require : pg.SslMode.disable,
+        tlsConnector: postgresTlsConnector,
         typeRegistry: pg.TypeRegistry(encoders: [pgvectorEncoder]),
         onOpen: (connection) async {
           var parameters =

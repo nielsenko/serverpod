@@ -1,6 +1,7 @@
 export 'package:serverpod_shared/serverpod_shared.dart' show DatabaseDialect;
 
 export 'src/adapters/postgres/postgres_error_codes.dart';
+export 'src/adapters/postgres/postgres_tls_connector.dart';
 export 'src/adapters/sqlite/sqlite_error_codes.dart';
 export 'src/bulk_data.dart';
 export 'src/concepts/column_value.dart';
