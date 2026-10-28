@@ -9,6 +9,7 @@ import '../../interface/database_pool_manager.dart';
 import '../../interface/serialization_manager.dart';
 import 'embedded_postgres_resolver.dart';
 import 'pgvector_encoder.dart';
+import 'postgres_pipeline_depth.dart';
 import 'postgres_tls_connector.dart';
 import 'value_encoder.dart';
 
@@ -33,6 +34,10 @@ class PostgresPoolManager implements DatabasePoolManager {
   pg.Pool? _pgPool;
 
   final pg.PoolSettings _poolSettings;
+
+  /// The settings the connection pool is created with.
+  @visibleForTesting
+  pg.PoolSettings get poolSettings => _poolSettings;
 
   /// Stops the embedded PostgreSQL this manager launched, or `null` when none
   /// was launched (no `dataPath`, or it attached to a postmaster another
@@ -74,6 +79,7 @@ class PostgresPoolManager implements DatabasePoolManager {
         queryTimeout: const Duration(minutes: 1),
         sslMode: config.requireSsl ? pg.SslMode.require : pg.SslMode.disable,
         tlsConnector: postgresTlsConnector,
+        pipelineDepth: postgresPipelineDepth,
         typeRegistry: pg.TypeRegistry(encoders: [pgvectorEncoder]),
         onOpen: (connection) async {
           var parameters =
