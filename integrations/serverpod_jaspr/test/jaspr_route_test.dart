@@ -199,4 +199,27 @@ void main() {
       expect(response.statusCode, 404);
     },
   );
+
+  test(
+    'Given a Jaspr route outside serverpod start, '
+    'when the reload events are requested, '
+    'then the response is 404.',
+    () async {
+      final port = await startPod(
+        pod,
+        JasprRoute(
+          'website',
+          build: (session, request) => p([jaspr.Component.text('page')]),
+          options: () => const jaspr.ServerOptions(),
+        ),
+        '/',
+      );
+
+      final response = await http.get(
+        Uri.parse('http://localhost:$port/\$serverpodReload'),
+      );
+
+      expect(response.statusCode, 404);
+    },
+  );
 }
