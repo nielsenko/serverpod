@@ -9,6 +9,7 @@ import 'package:serverpod_shared/serverpod_shared.dart' show JasprAppLocation;
 
 import 'dev_apps.dart';
 import 'dev_daemon.dart';
+import 'dev_reload.dart';
 import 'dev_restart_script.dart';
 
 /// Builds the root component of a Jaspr app for a page request.
@@ -32,11 +33,11 @@ typedef JasprAppBuilder = FutureOr<jaspr.Component> Function(
 /// than `html`, `htm` or `xml`, are served from the app's files.
 ///
 /// Under `serverpod start`, the files are the browser code the runner
-/// compiles and the app package's `web` directory. With a
-/// `jaspr daemon --skip-server` named by `JASPR_PROXY_PORT`, the files are
-/// forwarded to it instead and the daemon reloads the pages. Otherwise the
-/// files are the output of `jaspr_build` in the server's `web/<appId>`
-/// directory.
+/// compiles and the app package's `web` directory, and the route serves the
+/// events that reload its pages. With a `jaspr daemon --skip-server`
+/// named by `JASPR_PROXY_PORT`, the files are forwarded to it instead and the
+/// daemon reloads the pages. Otherwise the files are the output of
+/// `jaspr_build` in the server's `web/<appId>` directory.
 class JasprRoute extends Route {
   /// The app's identifier in the server's `jaspr_apps` configuration.
   final String appId;
@@ -84,11 +85,12 @@ class JasprRoute extends Route {
   @override
   void injectIn(RelicRouter router) {
     // Relic replays this after every hot reload, so Jaspr clears the caches
-    // it built from the old code here, and a daemon reloads the browsers
-    // when Jaspr asks.
+    // it built from the old code here. The runner reloads the browsers once
+    // their code is compiled too, and a daemon does it when Jaspr asks.
     jaspr.ServerApp.reassemble();
     if (_daemon != null && _injected) jaspr.ServerApp.reloadClients();
     _injected = true;
+    if (_isDev) registerJasprDevReload();
     super.injectIn(router);
   }
 
@@ -97,6 +99,9 @@ class JasprRoute extends Route {
     final segments = req.remainingPath.segments;
     final last = segments.isEmpty ? '' : segments.last;
 
+    if (last == devReloadPath) {
+      return _isDev ? devReloadEvents.handle(req) : Response.notFound();
+    }
     if (last == serverInstancePath) {
       return _inDevelopment ? serverInstanceResponse() : Response.notFound();
     }
@@ -126,7 +131,9 @@ class JasprRoute extends Route {
     request.skipDevAutoRefresh();
     final isReload = request.headers['x-jaspr-reload']?.first == 'true';
     return _toResponse(
-      isReload ? rendered : withDevRestartScript(rendered),
+      isReload
+          ? rendered
+          : withDevRestartScript(rendered, generation: devGenerations[appId]),
     );
   }
 
